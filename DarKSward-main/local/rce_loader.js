@@ -76,7 +76,7 @@ let workerCode = "";
 if(ios_version == '18,6' || ios_version == '18,6,1' || ios_version == '18,6,2')
     workerCode = getJS(`/local/rce_worker_18.6.js?${Date.now()}`); // local version
 else
-    workerCode = getJS(`/local/rce_worker_18.4.js?${Date.now()}`); // local version
+    workerCode = getJS(`/local/rce_worker.js?${Date.now()}`); // fallback to generic worker
 let workerBlob = new Blob([workerCode],{type:'text/javascript'});
 let workerBlobUrl = URL.createObjectURL(workerBlob);
 (() => {
