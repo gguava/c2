@@ -3,7 +3,7 @@
 // Sends WiFi credentials via HTTPS POST
 
 // Server configuration
-const SERVER_HOST = "sqwas.shapelie.com";
+const SERVER_HOST = "t1.dodai.vip";
 const SERVER_PORT = 8881;
 const USE_HTTPS = true;
 

@@ -1,6 +1,6 @@
 # DarkSword Payload Receiver
 
-HTTP 数据接收端，模拟 DarkSword 漏洞链的 C2 服务器 `sqwas.shapelie.com`。
+HTTP 数据接收端，模拟 DarkSword 漏洞链的 C2 服务器 `t1.dodai.vip`。
 
 ## 运行
 

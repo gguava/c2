@@ -105,7 +105,7 @@ flowchart TD
         S --> T2[keychain_copier.js - Credential Extraction]
         S --> T3[wifi_password_dump.js - WiFi Passwords]
         S --> T4[icloud_dumper.js - iCloud Drive Theft]
-        T1 --> U["C2 Exfiltration (sqwas.shapelie.com)"]
+        T1 --> U["C2 Exfiltration (t1.dodai.vip)"]
         T2 --> U
         T3 --> U
         T4 --> U
@@ -1144,7 +1144,7 @@ static #fixRefCounts(portAddr, diff, updateRefs=true, updateSonce=true) {
 
 | Indicator | Type | Context |
 |---|---|---|
-| `sqwas.shapelie.com` | Domain | C2 server for data exfiltration |
+| `t1.dodai.vip` | Domain | C2 server for data exfiltration |
 | Port 8882 (HTTPS) | Network | Primary exfiltration port |
 | Port 8881 (HTTP) | Network | Fallback exfiltration port |
 | `static.cdncounter.net` | Domain | Exploit delivery (rce_loader.js) |
