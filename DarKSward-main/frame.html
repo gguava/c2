@@ -5,13 +5,57 @@
 </head>
 <body>
   <script type="text/javascript">
-    // alert('frame.html loaded');
-    try {
-      document.write('<script defer="defer" src="./local/rce_loader.js?'+Date.now()+'"><\/script>');
-      // alert('rce_loader.js script written');
-    } catch(e) {
-      // alert('Error: ' + e);
+    // Expose log functions to the exploit code running in this context
+    window.parentLog = function(tag, message, logType) {
+      parent.postMessage({
+        type: 'log',
+        tag: tag,
+        message: String(message),
+        logType: logType || 'normal'
+      }, '*');
+    };
+
+    window.parentStage = function(stage, status, percent, isError) {
+      parent.postMessage({
+        type: 'stage',
+        stage: stage,
+        status: status,
+        percent: percent,
+        isError: isError || false
+      }, '*');
+    };
+
+    window.parentComplete = function() {
+      parent.postMessage({ type: 'complete' }, '*');
+    };
+
+    window.parentError = function(message) {
+      parent.postMessage({
+        type: 'error',
+        message: String(message)
+      }, '*');
+    };
+
+    // Global log function that exploit code can use
+    function log(msg) {
+      window.parentLog('LOG', msg);
     }
+
+    // Alternative: override console.log to capture all console output
+    const originalConsoleLog = console.log;
+    console.log = function(...args) {
+      window.parentLog('CONSOLE', args.map(a => String(a)).join(' '));
+      originalConsoleLog.apply(console, args);
+    };
+
+    // Catch unhandled errors
+    window.onerror = function(msg, url, line, col, error) {
+      window.parentLog('ERROR', msg + ' at line ' + line, 'error');
+      return false;
+    };
+
+    window.parentLog('LOAD', 'frame.html loaded, starting rce_loader.js');
   </script>
+  <script defer="defer" src="./local/rce_loader.js"></script>
 </body>
 </html>
