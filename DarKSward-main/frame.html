@@ -18,8 +18,45 @@ var wsHost = 'ws://' + window.location.hostname + ':8001';
 var logBuffer = [];
 var connected = false;
 var logCount = 0;
-var MAX_LINES = 500;
+var MAX_LINES = 200;
 var logDiv = null;
+var pendingLogs = [];
+var flushTimeout = null;
+
+function flushLogs() {
+    if (!logDiv) logDiv = document.getElementById('log');
+    if (pendingLogs.length === 0) return;
+
+    var fragment = document.createDocumentFragment();
+    pendingLogs.forEach(function(item) {
+        var span = document.createElement('span');
+        span.className = item.className;
+        span.textContent = '[' + item.tag + '] ' + item.msg + '\n';
+        fragment.appendChild(span);
+    });
+    logDiv.appendChild(fragment);
+    pendingLogs = [];
+
+    logCount += 20;
+    if (logCount > MAX_LINES) {
+        logDiv.innerHTML = logDiv.innerHTML.split('\n').slice(-MAX_LINES).join('\n');
+    }
+
+    logDiv.scrollTop = logDiv.scrollHeight;
+}
+
+function displayLog(tag, message, logType) {
+    var className = '';
+    if (logType === 'error') className = 'error';
+    else if (logType === 'info') className = 'info';
+    else if (logType === 'success') className = 'success';
+
+    pendingLogs.push({tag: tag, msg: message, className: className});
+
+    if (!flushTimeout) {
+        flushTimeout = setTimeout(flushLogs, 100);
+    }
+}
 
 function connectWS() {
     try {
@@ -40,30 +77,6 @@ function connectWS() {
     }
 }
 connectWS();
-
-function displayLog(tag, message, logType) {
-    if (!logDiv) logDiv = document.getElementById('log');
-    var line = '[' + tag + '] ' + message;
-    var className = '';
-    if (logType === 'error') className = 'error';
-    else if (logType === 'info') className = 'info';
-    else if (logType === 'success') className = 'success';
-
-    logDiv.innerHTML += '<span class="' + className + '">' + escapeHtml(line) + '</span>\n';
-    logCount++;
-
-    if (logCount > MAX_LINES) {
-        var html = logDiv.innerHTML;
-        var lines = html.split('\n');
-        logDiv.innerHTML = lines.slice(-MAX_LINES).join('\n');
-    }
-
-    logDiv.scrollTop = logDiv.scrollHeight;
-}
-
-function escapeHtml(text) {
-    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
 
 function sendLog(data) {
     var msg = JSON.stringify(data);
