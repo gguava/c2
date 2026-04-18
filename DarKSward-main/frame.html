@@ -4,7 +4,7 @@
   <title></title>
   <style>
     body { background: #1a1a1a; color: #00ff00; font-family: monospace; padding: 10px; margin: 0; }
-    #log { white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.4; }
+    #log { white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.4; max-height: 100vh; overflow-y: auto; }
     .error { color: #ff4444; }
     .info { color: #4488ff; }
     .success { color: #44ff44; }
@@ -17,6 +17,9 @@ var ws = null;
 var wsHost = 'ws://' + window.location.hostname + ':8001';
 var logBuffer = [];
 var connected = false;
+var logCount = 0;
+var MAX_LINES = 500;
+var logDiv = null;
 
 function connectWS() {
     try {
@@ -39,13 +42,22 @@ function connectWS() {
 connectWS();
 
 function displayLog(tag, message, logType) {
-    var logDiv = document.getElementById('log');
+    if (!logDiv) logDiv = document.getElementById('log');
     var line = '[' + tag + '] ' + message;
     var className = '';
     if (logType === 'error') className = 'error';
     else if (logType === 'info') className = 'info';
     else if (logType === 'success') className = 'success';
+
     logDiv.innerHTML += '<span class="' + className + '">' + escapeHtml(line) + '</span>\n';
+    logCount++;
+
+    if (logCount > MAX_LINES) {
+        var html = logDiv.innerHTML;
+        var lines = html.split('\n');
+        logDiv.innerHTML = lines.slice(-MAX_LINES).join('\n');
+    }
+
     logDiv.scrollTop = logDiv.scrollHeight;
 }
 
