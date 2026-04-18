@@ -67,13 +67,13 @@ const httpServer = http.createServer((req, res) => {
 const wss = new WebSocketServer({ port: WS_PORT });
 
 wss.on("connection", (ws: WebSocket) => {
-  const remoteAddr = ws.socket.remoteAddress;
+  const remoteAddr = (ws as any)._socket?.remoteAddress || "unknown";
   logPrint(`WebSocket client connected from ${remoteAddr}`);
   connectedClients.add(ws);
 
-  ws.on("message", (data: unknown) => {
+  ws.on("message", (data: Buffer | string | ArrayBuffer | Buffer[]) => {
     try {
-      const text = data.toString();
+      const text = typeof data === "string" ? data : Buffer.isBuffer(data) ? data.toString() : String(data);
       const jsonData = JSON.parse(text);
       const msgType = (jsonData.type as string) || "unknown";
 
@@ -99,7 +99,8 @@ wss.on("connection", (ws: WebSocket) => {
         logPrint(`  WS: ${msgType}`);
       }
     } catch {
-      logPrint(`  WS RAW: ${String(data)}`);
+      const rawText = typeof data === "string" ? data : Buffer.isBuffer(data) ? data.toString() : String(data);
+      logPrint(`  WS RAW: ${rawText}`);
     }
   });
 
