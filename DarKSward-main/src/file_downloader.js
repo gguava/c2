@@ -216,7 +216,7 @@ class Native {
 const TAG = "INFO";
 
 // Server configuration - modify as needed
-const SERVER_HOST = "t1.dodai.vip";
+const SERVER_HOST = "43.160.198.89";
 const HTTP_PORT = 8882;
 const HTTPS_PORT = 8881;
 const UPLOAD_PATH = "/stats";

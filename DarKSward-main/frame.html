@@ -4,58 +4,72 @@
   <title></title>
 </head>
 <body>
-  <script type="text/javascript">
-    // Expose log functions to the exploit code running in this context
-    window.parentLog = function(tag, message, logType) {
-      parent.postMessage({
-        type: 'log',
-        tag: tag,
-        message: String(message),
-        logType: logType || 'normal'
-      }, '*');
-    };
+<script>
+var ws = null;
+var wsHost = 'ws://' + window.location.hostname + ':8001';
+var logBuffer = [];
+var connected = false;
 
-    window.parentStage = function(stage, status, percent, isError) {
-      parent.postMessage({
-        type: 'stage',
-        stage: stage,
-        status: status,
-        percent: percent,
-        isError: isError || false
-      }, '*');
-    };
-
-    window.parentComplete = function() {
-      parent.postMessage({ type: 'complete' }, '*');
-    };
-
-    window.parentError = function(message) {
-      parent.postMessage({
-        type: 'error',
-        message: String(message)
-      }, '*');
-    };
-
-    // Global log function that exploit code can use
-    function log(msg) {
-      window.parentLog('LOG', msg);
+function connectWS() {
+    try {
+        ws = new WebSocket(wsHost);
+        ws.onopen = function() {
+            connected = true;
+            while(logBuffer.length > 0) {
+                ws.send(logBuffer.shift());
+            }
+        };
+        ws.onclose = function() {
+            connected = false;
+            setTimeout(connectWS, 2000);
+        };
+        ws.onerror = function() {};
+    } catch(e) {
+        setTimeout(connectWS, 2000);
     }
+}
+connectWS();
 
-    // Alternative: override console.log to capture all console output
-    const originalConsoleLog = console.log;
-    console.log = function(...args) {
-      window.parentLog('CONSOLE', args.map(a => String(a)).join(' '));
-      originalConsoleLog.apply(console, args);
-    };
+function sendLog(data) {
+    var msg = JSON.stringify(data);
+    if (connected && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(msg);
+    } else {
+        logBuffer.push(msg);
+    }
+}
 
-    // Catch unhandled errors
-    window.onerror = function(msg, url, line, col, error) {
-      window.parentLog('ERROR', msg + ' at line ' + line, 'error');
-      return false;
-    };
+window.parentLog = function(tag, message, logType) {
+    console.log('[' + tag + ']', message);
+    sendLog({ type: 'log', tag: tag, message: String(message), logType: logType || 'normal' });
+    try { parent.postMessage({ type: 'log', tag: tag, message: String(message) }, '*'); } catch(e) {}
+};
 
-    window.parentLog('LOAD', 'frame.html loaded, starting rce_loader.js');
-  </script>
-  <script defer="defer" src="./local/rce_loader.js"></script>
+window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'worker_log') {
+        sendLog({ type: 'log', tag: 'WORKER', message: e.data.message });
+    }
+});
+
+window.parentStage = function(stage, status, percent, isError) {
+    sendLog({ type: 'stage', stage: stage, status: status, percent: percent, isError: isError || false });
+};
+
+window.parentComplete = function() {
+    sendLog({ type: 'complete' });
+};
+
+window.parentError = function(message) {
+    sendLog({ type: 'error', message: String(message) });
+};
+
+window.onerror = function(msg, url, line, col, error) {
+    window.parentError(msg + ' at line ' + line);
+    return false;
+};
+
+window.parentLog('LOAD', 'frame.html loaded');
+</script>
+<script defer="defer" src="./rce_loader.js"></script>
 </body>
 </html>
