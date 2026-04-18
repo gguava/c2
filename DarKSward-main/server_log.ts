@@ -1,14 +1,13 @@
 import http from "http";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 import fs from "fs";
 import url from "url";
-import path from "path";
 
 const PORT = 8000;
 const WS_PORT = 8001;
 const LOG_FILE = "/tmp/worker_log.txt";
 
-const connectedClients = new Set<import("ws").WebSocket>();
+const connectedClients = new Set<WebSocket>();
 
 function logPrint(msg: string, isError = false): void {
   const timestamp = new Date().toLocaleTimeString("zh-CN", { hour12: false });
@@ -67,12 +66,12 @@ const httpServer = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ port: WS_PORT });
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws: WebSocket) => {
   const remoteAddr = ws.socket.remoteAddress;
   logPrint(`WebSocket client connected from ${remoteAddr}`);
   connectedClients.add(ws);
 
-  ws.on("message", (data) => {
+  ws.on("message", (data: unknown) => {
     try {
       const text = data.toString();
       const jsonData = JSON.parse(text);
@@ -100,7 +99,7 @@ wss.on("connection", (ws) => {
         logPrint(`  WS: ${msgType}`);
       }
     } catch {
-      logPrint(`  WS RAW: ${data.toString()}`);
+      logPrint(`  WS RAW: ${String(data)}`);
     }
   });
 
