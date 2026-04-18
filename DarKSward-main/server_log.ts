@@ -2,6 +2,7 @@ import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import fs from "fs";
 import url from "url";
+import path from "path";
 
 const PORT = 8000;
 const WS_PORT = 8001;
@@ -17,6 +18,18 @@ function logPrint(msg: string, isError = false): void {
   console.log(`${prefix}${logEntry}${suffix}`);
   fs.appendFileSync(LOG_FILE, logEntry + "\n");
 }
+
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html",
+  ".js": "application/javascript",
+  ".css": "text/css",
+  ".json": "application/json",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+};
 
 const httpServer = http.createServer((req, res) => {
   const clientIp = req.socket.remoteAddress || "unknown";
@@ -45,6 +58,22 @@ const httpServer = http.createServer((req, res) => {
       logPrint("WebSocket upgrade request received");
       res.writeHead(400);
       res.end();
+      return;
+    }
+
+    let filePath = parsedUrl.pathname === "/" ? "/index.html" : parsedUrl.pathname || "/index.html";
+    const fullPath = path.join(__dirname, filePath);
+    const ext = path.extname(fullPath);
+    const mimeType = MIME_TYPES[ext] || "application/octet-stream";
+
+    try {
+      const content = fs.readFileSync(fullPath);
+      res.writeHead(200, { "Content-Type": mimeType });
+      res.end(content);
+      return;
+    } catch {
+      res.writeHead(404);
+      res.end("Not Found");
       return;
     }
   }
