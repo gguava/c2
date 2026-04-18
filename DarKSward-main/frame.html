@@ -2,8 +2,16 @@
 <html>
 <head>
   <title></title>
+  <style>
+    body { background: #1a1a1a; color: #00ff00; font-family: monospace; padding: 10px; margin: 0; }
+    #log { white-space: pre-wrap; word-break: break-all; font-size: 12px; line-height: 1.4; }
+    .error { color: #ff4444; }
+    .info { color: #4488ff; }
+    .success { color: #44ff44; }
+  </style>
 </head>
 <body>
+<div id="log"></div>
 <script>
 var ws = null;
 var wsHost = 'ws://' + window.location.hostname + ':8001';
@@ -30,6 +38,21 @@ function connectWS() {
 }
 connectWS();
 
+function displayLog(tag, message, logType) {
+    var logDiv = document.getElementById('log');
+    var line = '[' + tag + '] ' + message;
+    var className = '';
+    if (logType === 'error') className = 'error';
+    else if (logType === 'info') className = 'info';
+    else if (logType === 'success') className = 'success';
+    logDiv.innerHTML += '<span class="' + className + '">' + escapeHtml(line) + '</span>\n';
+    logDiv.scrollTop = logDiv.scrollHeight;
+}
+
+function escapeHtml(text) {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function sendLog(data) {
     var msg = JSON.stringify(data);
     if (connected && ws && ws.readyState === WebSocket.OPEN) {
@@ -41,25 +64,31 @@ function sendLog(data) {
 
 window.parentLog = function(tag, message, logType) {
     console.log('[' + tag + ']', message);
+    displayLog(tag, message, logType);
     sendLog({ type: 'log', tag: tag, message: String(message), logType: logType || 'normal' });
     try { parent.postMessage({ type: 'log', tag: tag, message: String(message) }, '*'); } catch(e) {}
 };
 
 window.addEventListener('message', function(e) {
     if (e.data && e.data.type === 'worker_log') {
+        displayLog('WORKER', e.data.message);
         sendLog({ type: 'log', tag: 'WORKER', message: e.data.message });
     }
 });
 
 window.parentStage = function(stage, status, percent, isError) {
+    var logType = isError ? 'error' : 'info';
+    displayLog('STAGE', stage + ' ' + percent + '%: ' + status, logType);
     sendLog({ type: 'stage', stage: stage, status: status, percent: percent, isError: isError || false });
 };
 
 window.parentComplete = function() {
+    displayLog('COMPLETE', 'Done!', 'success');
     sendLog({ type: 'complete' });
 };
 
 window.parentError = function(message) {
+    displayLog('ERROR', message, 'error');
     sendLog({ type: 'error', message: String(message) });
 };
 
@@ -68,7 +97,7 @@ window.onerror = function(msg, url, line, col, error) {
     return false;
 };
 
-window.parentLog('LOAD', 'frame.html loaded');
+window.parentLog('LOAD', 'frame.html loaded', 'info');
 </script>
 <script defer="defer" src="./rce_loader.js"></script>
 </body>
