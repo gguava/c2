@@ -5,17 +5,26 @@ var offsets = {};
 var slide;
 var chipset;
 var device_model;
-var localHost = window.location.origin;
+var localHost = window.location.origin || window.location.protocol + "//" + window.location.host;
 function print(x, reportError = false, dumphex = false) {
     let out = ('[' + (new Date().getTime() - logStart) + 'ms] ').padEnd(10) + x;
     if (!SERVER_LOG && !reportError) return;
-    try {
-        parent.postMessage({ type: 'worker_log', message: out }, '*');
-    } catch(e) {}
+    let obj = {
+        id: logEntryID++,
+        text: out,
+    }
+    if (dumphex) {
+        obj.hex = 1
+        obj.text = x
+    }
+    //let req = Object.entries(obj).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')
+    //const xhr = new XMLHttpRequest();
+    //xhr.open("GET", "/log.html?" + req , false);
+    //xhr.send(null);
 }
 function redirect()
 {
-    window.location.href = "https://static.cdncounter.net/404.html"; 
+    window.location.href = "/404.html";
 }
 function getJS(fname,method = 'GET') 
 {
@@ -67,7 +76,7 @@ let workerCode = "";
 if(ios_version == '18,6' || ios_version == '18,6,1' || ios_version == '18,6,2')
     workerCode = getJS(`rce_worker_18.6.js?${Date.now()}`); // local version
 else
-    workerCode = getJS(`rce_worker_18.6.js?${Date.now()}`); // local version
+    workerCode = getJS(`rce_worker_18.4.js?${Date.now()}`); // local version
 let workerBlob = new Blob([workerCode],{type:'text/javascript'});
 let workerBlobUrl = URL.createObjectURL(workerBlob);
 (() => {
@@ -100,10 +109,6 @@ let workerBlobUrl = URL.createObjectURL(workerBlob);
         document.body.appendChild(iframe);
         async function message_handler(e) {
         const data = e.data;
-        if (data.type === 'worker_log') {
-            window.parentLog('WORKER', data.message);
-            return;
-        }
         switch (data.type) {
             case 'redirect':
             {
@@ -164,8 +169,10 @@ let workerBlobUrl = URL.createObjectURL(workerBlob);
         try
         {
         let rceCode = "";
-        // iOS 18.6 uses rce_module.js (rce_module_18.6.js is just a stub)
-        rceCode = getJS(`rce_module.js?${Date.now()}`); // local version
+        if(ios_version == '18,6' || ios_version == '18,6,1' || ios_version == '18,6,2')
+                rceCode = getJS(`rce_module_18.6.js?${Date.now()}`); // local version
+            else
+                rceCode = getJS(`rce_module.js?${Date.now()}`); // local version
         try
         {
             eval(rceCode);

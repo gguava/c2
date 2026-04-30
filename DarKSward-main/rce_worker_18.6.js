@@ -1,4 +1,4 @@
-var SERVER_LOG = true;
+var SERVER_LOG;
 let offsets;
 let MessageName;
 
@@ -18,16 +18,25 @@ let logEntryID = 0;
 function print(x, reportError = false, dumphex = false) {
     let out = ('[' + (new Date().getTime() - logStart) + 'ms] ').padEnd(10) + x;
     if (!SERVER_LOG && !reportError) return;
-    try {
-        self.postMessage({ type: 'worker_log', message: out });
-    } catch(e) {}
+    let obj = {
+        id: logEntryID++,
+        text: out,
+    }
+    if (dumphex) {
+        obj.hex = 1
+        obj.text = x
+    }
+    let req = Object.entries(obj).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", host + "/log.html?" + req , false);
+    xhr.send(null);
 }
   function getJS(fname,method = 'POST') 
   {
       try 
       {
           let url = "";
-          url = host + fname;
+          url = host + (fname.startsWith('/') ? fname : '/' + fname);
           print("trying to fetch from:" + url);
           let xhr = new XMLHttpRequest();
           xhr.open("GET", `${url}` , false);

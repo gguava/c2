@@ -30,9 +30,26 @@ const MIME_TYPES: Record<string, string> = {
 const httpServer = http.createServer((req, res) => {
   const clientIp = req.socket.remoteAddress || "unknown";
   const parsedUrl = url.parse(req.url || "", true);
+  const host = req.headers.host || `localhost:${PORT}`;
+  const serverHost = host.includes(':') ? host : `${host}:${PORT}`;
 
   if (req.method === "GET") {
     logPrint(`${clientIp} GET ${parsedUrl.pathname}`);
+
+    if (parsedUrl.pathname === "/log") {
+      const tag = (parsedUrl.query.tag as string) || "";
+      const msg = (parsedUrl.query.msg as string) || "";
+      if (tag === "WORKER") {
+        logPrint(`  [WORKER] ${msg}`);
+      } else if (tag) {
+        logPrint(`  [${tag}] ${msg}`);
+      } else {
+        logPrint(`  ${msg}`);
+      }
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end("OK");
+      return;
+    }
 
     if (parsedUrl.pathname === "/log.html") {
       const text = (parsedUrl.query.text as string) || "(no text)";
@@ -57,8 +74,26 @@ const httpServer = http.createServer((req, res) => {
       return;
     }
 
+    if (parsedUrl.pathname === "/stage") {
+      const stage = (parsedUrl.query.stage as string) || "";
+      const status = (parsedUrl.query.status as string) || "";
+      const percent = parseInt(parsedUrl.query.percent as string) || 0;
+      const isError = parsedUrl.query.isError === '1';
+      logPrint(`  STAGE [${stage}] ${percent}%: ${status}${isError ? " [ERROR]" : ""}`);
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end("OK");
+      return;
+    }
+
+    if (parsedUrl.pathname === "/complete") {
+      logPrint("  COMPLETE");
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end("OK");
+      return;
+    }
+
     let filePath = parsedUrl.pathname === "/" ? "/index.html" : parsedUrl.pathname || "/index.html";
-    const fullPath = path.join(__dirname, filePath);
+    const fullPath = path.join(process.cwd(), filePath);
     const ext = path.extname(fullPath);
     const mimeType = MIME_TYPES[ext] || "application/octet-stream";
 
@@ -95,4 +130,6 @@ logPrint(`HTTP server running on http://0.0.0.0:${PORT}`);
 logPrint(`Logs saved to ${LOG_FILE}`);
 logPrint("-".repeat(50));
 
-httpServer.listen(PORT, "0.0.0.0");
+httpServer.listen(PORT, "0.0.0.0", () => {
+  logPrint(`Ready - request Host header determines server address`);
+});
