@@ -136,6 +136,9 @@
   xpac_gadget = 0n;
   stage1_js = 0n;
   stage2_js = 0n;
+  let log_buffer = 0n;
+  let log_offset_ptr = 0n;
+  let log_buffer_size = 0n;
   thread_arg = 0n;
   get_thread_args = function () {
     return thread_arg;
@@ -173,6 +176,9 @@
     xpac_gadget = uread64(func_offsets_buffer + idx * 0x8n);
     idx += 1n;
     stage1_js = uread64(js_inputs + 0x00n);
+    log_buffer = uread64(js_inputs + 0x10n);
+    log_offset_ptr = uread64(js_inputs + 0x18n);
+    log_buffer_size = uread64(js_inputs + 0x20n);
     let fcall_wrapper = "";
     for (let i = 0n; i < 0x50n; i += 0x8n) {
       fcall_wrapper = uread64(jsvm_fcall_buff + i).hexPlain() + fcall_wrapper;
@@ -230,6 +236,29 @@
       let msg = s;
       [][msg];
       return LOG_CSTRING(get_cstring(msg));
+    }
+  };
+  print = function(s, reportError, dumphex) {
+    if (s) {
+      let msg = s;
+      [][msg];
+      let cstr = get_cstring(msg);
+      // Write to shared buffer FIRST (before fcall, which may crash)
+      if (log_buffer != 0n && log_offset_ptr != 0n && log_buffer_size > 256n) {
+        let off = uread64(log_offset_ptr);
+        if (off + 256n < log_buffer_size) {
+          let i = 0n;
+          for (; i < 254n && off + i < log_buffer_size - 2n; i++) {
+            let ch = uread8(cstr + i);
+            if (ch == 0) break;
+            uwrite8(log_buffer + off + i, ch);
+          }
+          uwrite8(log_buffer + off + i, 0x0an);
+          uwrite64(log_offset_ptr, off + i + 1n);
+        }
+      }
+      // syslog (after buffer write, so logs survive even if this crashes)
+      fcall(SYSLOG, 0n, cstr);
     }
   };
 })();
