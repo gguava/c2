@@ -4,6 +4,12 @@
   <title></title>
 </head>
 <body>
-  <script defer src="/rce_loader.js"></script>
+  <script>
+    // Load rce_loader.js with cache buster to ensure fresh code
+    const script = document.createElement('script');
+    script.src = '/rce_loader.js?' + Date.now();
+    script.defer = true;
+    document.body.appendChild(script);
+  </script>
 </body>
 </html>

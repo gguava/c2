@@ -185,6 +185,18 @@
     }
     fcall_args_wrapper = BigInt("0x" + fcall_wrapper);
     addrof_fcall_args_wrapper = get_bigint_addr(fcall_args_wrapper);
+    // Debug: write to log_buffer before calling fcall
+    if (log_buffer != 0n && log_offset_ptr != 0n) {
+      let debug_msg = "[PE] fcall_init done, calling syslog resolve\n";
+      let cstr = get_cstring(debug_msg);
+      let off = uread64(log_offset_ptr);
+      for (let i = 0n; i < 100n; i++) {
+        let ch = uread8(cstr + i);
+        if (ch == 0) break;
+        uwrite8(log_buffer + off + i, ch);
+      }
+      uwrite64(log_offset_ptr, off + 50n);
+    }
     SYSLOG = func_resolve("syslog");
   };
   fcall = function (pc, ...args) {
@@ -205,6 +217,18 @@
     return uread64(addrof_fcall_args_wrapper + 0x28n);
   };
   func_resolve = function (symbol) {
+    // Debug: write to log_buffer before calling fcall
+    if (log_buffer != 0n && log_offset_ptr != 0n) {
+      let debug_msg = "[PE] func_resolve calling fcall for " + symbol + "\n";
+      let cstr = get_cstring(debug_msg);
+      let off = uread64(log_offset_ptr);
+      for (let i = 0n; i < 100n; i++) {
+        let ch = uread8(cstr + i);
+        if (ch == 0) break;
+        uwrite8(log_buffer + off + i, ch);
+      }
+      uwrite64(log_offset_ptr, off + 50n);
+    }
     let fptr = fcall(DLSYM, 0xFFFFFFFFFFFFFFFEn, get_cstring(symbol));
     return pacia(fptr.noPAC(), 0xc2d0n);
   };

@@ -8393,7 +8393,7 @@
         const gpuFcallDisableSleep = gpu_fcall_disable_sleep;
         const addrof = p.addrof;
         const sc_slide = p.slide;
-        const sbx1_script = getJS('/sbx1_main.js');
+        const sbx1_script = getJS('/sbx1_main.js?' + Date.now());
         eval(sbx1_script);
         LOG('Restore bmalloc metadata after emptyString Corruption');
         gpu_write64(offsets.emptyString + 0x68n, 0x300000005n);
