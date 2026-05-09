@@ -22,27 +22,30 @@ pw("[PE] A: start");
 let our_pid = uread64(surf + 0xF830n);
 pw("[PE] B: pid=" + our_pid);
 
-// Read proc_listpids
 let plist_buf = uread64(surf + 0xF838n);
 let plist_count = uread64(surf + 0xF840n);
-pw("[PE] C: cnt=" + plist_count);
+let sb_pid = uread64(surf + 0xF848n);
+pw("[PE] C: cnt=" + plist_count + " sb=" + sb_pid);
 
-if (plist_buf == 0n || plist_count == 0n) {
-  pw("[PE] D: no plist");
+if (sb_pid != 0n) {
+  pw("[PE] D: SpringBoard PID=" + sb_pid);
 } else {
-  // Find SpringBoard PID - it's the one we want to inject
-  // SpringBoard typically has a low PID and is always running
-  // We need to ask sbx1 to call proc_name for each PID
-  // For now, just output the count and our own PID
-  let num = plist_count / 4n;
-  pw("[PE] D: " + num + " procs");
-
-  // Store PID list for sbx1 to read back
-  // Write count and our_pid at known IOSurface offsets for sbx1
-  uwrite64(surf + 0xF848n, plist_buf);
-  uwrite64(surf + 0xF850n, plist_count);
-  uwrite64(surf + 0xF858n, our_pid);
-  uwrite64(surf + 0xF860n, 1n); // flag: PE is ready
+  pw("[PE] D: SpringBoard not found yet");
+  // Dump a few more PIDs
+  if (plist_buf != 0n && plist_count > 0n) {
+    let num = plist_count / 4n;
+    let pids = [];
+    for (let i = 0n; i < num && i < 30n; i++) {
+      let addr = plist_buf + i * 4n;
+      let aligned = addr & ~7n;
+      let val = uread64(aligned);
+      let shift = (addr - aligned) * 8n;
+      let p = (val >> shift) & 0xFFFFFFFFn;
+      if (p == 0n) continue;
+      pids.push("["+i+"]="+p);
+    }
+    pw("[PE] E: first 30: " + pids.join(" "));
+  }
 }
 
 pw("[PE] DONE");
