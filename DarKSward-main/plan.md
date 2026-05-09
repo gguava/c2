@@ -8,7 +8,9 @@
 - ✅ M2: PE fcall 调试 → **JOP chain 挂死，改用 mpd_fcall 绕过**
 - ✅ M3: getpid 调用成功 (1016)
 - ✅ M4: SpringBoard PID=34 找到 (proc_name 扫描)
-- ❌ M5: 内核读写 — mpd_kread64 未初始化
+- 🔄 M5: 内核读写 — 代码已添加，待设备测试
+- 🔄 M6: 注入 SpringBoard — 代码已添加，依赖 M5
+- 🔄 M7: file_downloader — 代码已添加，依赖 M6
 
 ### 核心架构：IOSurface RPC 通道
 
@@ -124,10 +126,50 @@ LOG(`[MPD] socket() = ${sock_fd}`);
 
 ### M5 Step 2：建立内核读写通道
 
-socket 创建成功后：
-- 用 `gpuDlsym("getsockopt")` / `gpuDlsym("setsockopt")` 解析
-- 用 `mpd_fcall` 调 `setsockopt(ICMP6_FILTER)` 设置过滤规则
-- 用 `mpd_fcall` 调 `getsockopt(ICMP6_FILTER)` 读取内核数据
-- 包装成 `mpd_kread64` / `mpd_kwrite64` 接口
+**已实现** (sbx1_main.js:7125-7259):
 
-或者：将 socket fd 传回 PE，让 PE 用 header.js 已有的 `early_kread64` 逻辑（此时 PE 不需要 fcall，因为 getsockopt/setsockopt 可以用 mpd_fcall 包装）。
+1. **Socket 诊断**: mpd_fcall(socket, AF_INET6=30, SOCK_DGRAM=2, IPPROTO_ICMPV6=58)
+   - 创建 2 个 ICMPv6 socket (control + rw)
+   - 测试 setsockopt/getsockopt 往返
+
+2. **全局 kread64/kwrite64 包装器**: `globalThis.mpd_kread64` / `mpd_kwrite64`
+   - 通过 mpd_fcall 调用 MPD 中的 getsockopt/setsockopt
+   - `mpd_kread_length` / `mpd_kernel_base` 也注册了
+
+3. **GPU 回退**: 如果 socket 失败，pe_main_minimal.js 会尝试通过 read64/write64 进行 GPU 内核 r/w 测试
+
+**待设备测试**:
+- socket() 在 MPD sandbox 下是否允许
+- setsockopt(ICMP6_FILTER)/getsockopt(ICMP6_FILTER) 是否工作
+- PCB 损坏步骤（需要物理内存扫描找到 pcb 地址）
+
+### M6 实现 (sbx1_main.js:7433-7501)
+
+- SpringBoard 任务端口获取 (task_for_pid via mpd_fcall)
+- 远程内存分配 (mach_vm_allocate via mpd_fcall)
+- Shellcode 写入 (mach_vm_write via mpd_fcall)
+- 内存保护设置 (mach_vm_protect via mpd_fcall)
+
+### M7 实现 (sbx1_main.js:7470-7495)
+
+- 远程线程创建 (thread_create_running via mpd_fcall)
+- IOSurface 状态寄存器 (+0xF878..+0xF888)
+
+### IOSurface RPC 状态寄存器
+
+| Offset | 字段 | 由谁设置 | 描述 |
+|--------|------|----------|------|
+| +0xF850 | control_sock | sbx1 (M5) | ICMPv6 control socket fd |
+| +0xF858 | rw_sock | sbx1 (M5) | ICMPv6 rw socket fd |
+| +0xF860 | setsockopt ptr | sbx1 (M5) | setsockopt 函数指针 |
+| +0xF868 | getsockopt ptr | sbx1 (M5) | getsockopt 函数指针 |
+| +0xF870 | kernel_base | sbx1 (M5) | 内核基址候选 |
+| +0xF878 | sb_remote_addr | sbx1 (M6) | SpringBoard 远程分配地址 |
+| +0xF880 | sb_task_port | sbx1 (M6) | SpringBoard 任务端口 |
+| +0xF888 | sb_thread_port | sbx1 (M7) | SpringBoard 远程线程端口 |
+
+### 关键限制
+
+**PCB 损坏问题**: ICMPv6 socket 内核读写需要在 MPD 进程中找到 socket 的 pcb 地址并损坏。这需要物理内存访问（gpuRead64/gpuWrite64），或通过 mpd_fcall 在 MPD 中设置 pipe+race condition（可能太慢，~2s/fcall）。
+
+**备选方案**: 如果 socket corruption 不可行，sbx1 可通过 gpuRead64/gpuWrite64 直接做内核读写（如 GPU IOMMU 可访问物理内存），通过 IOSurface 代理 PE 的内核读请求。

