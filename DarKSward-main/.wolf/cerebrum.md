@@ -38,6 +38,10 @@
 <!-- Mistakes made and corrected. Each entry prevents the same mistake recurring. -->
 <!-- Format: [YYYY-MM-DD] Description of what went wrong and what to do instead. -->
 
+[2026-05-11] Do NOT use `xpac()` (clears bits 48-55) for kernel VA pointers — it strips the 0xFFFFFFF prefix. Use `xpac_full()` instead which restores kernel prefix via `0xFFFFFFF000000000n | (raw & 0xFFFFFFFFFn)`. For KC user-space addresses (gpuDlsym results), use `noPAC()` (ptr & 0x7FFFFFFFFFn) which correctly preserves bits 38:0.
+[2026-05-11] Do NOT try to GPU-read 0xFFFFFFF... addresses via uread64 — GPU IOMMU cannot map high-half kernel VAs. Only KC-mapped pages (0x1_XXX range) are readable via GPU.
+[2026-05-11] gpuDlsym returns PAC-signed KC user-space addresses (0x1_XXX), NOT kernel VAs. The KC slide and kernel slide are the same KASLR value, but the address spaces are different.
+
 ## Decision Log
 
 <!-- Significant technical decisions with rationale. Why X was chosen over Y. -->

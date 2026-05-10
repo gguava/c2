@@ -8393,7 +8393,7 @@
         const gpuFcallDisableSleep = gpu_fcall_disable_sleep;
         const addrof = p.addrof;
         const sc_slide = p.slide;
-        const sbx1_script = getJS('/sbx1_main.js?' + Date.now());
+        const sbx1_script = getJS('/sbx1_main.js?v=' + Date.now() + '&build=2026-05-11-phase1-v2');
         eval(sbx1_script);
         // Note: bmalloc metadata is now restored at the end of sbx1_main.js
         // before the IIFE returns, to avoid GC crashes during eval() return.

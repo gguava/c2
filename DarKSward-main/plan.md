@@ -1,175 +1,200 @@
-# 开发计划：sbx1 内实现 PE fcall 与数据提取
+# DarKSward 开发路线图
 
-## 当前状态（2025-05-10 深夜）
-
-### 已验证
-- ✅ M0: IOSurface 共享内存日志通道
-- ✅ M1: sbx1 预解析函数指针传入 PE (func_offsets_array[0-19])
-- ✅ M2: PE fcall 调试 → **JOP chain 挂死，改用 mpd_fcall 绕过**
-- ✅ M3: getpid 调用成功 (1016)
-- ✅ M4: SpringBoard PID=34 找到 (proc_name 扫描)
-- 🔄 M5: 内核读写 — 代码已添加，待设备测试
-- 🔄 M6: 注入 SpringBoard — 代码已添加，依赖 M5
-- 🔄 M7: file_downloader — 代码已添加，依赖 M6
-
-### 核心架构：IOSurface RPC 通道
-
-```
-sbx1 (WebContent)                    PE (MPD)
-  │                                    │
-  ├─ mpd_fcall(getpid) ─────────────► │ 读 surf+0xF830
-  ├─ mpd_fcall(proc_listpids) ──────► │ 读 surf+0xF838
-  ├─ mpd_fcall(proc_name) ──────────► │ 读 surf+0xF848 (SpringBoard PID)
-  │                                    │
-  │  ◄── IOSurface (0xF000-0xFFFF) ── │ pw("[PE] log...")
-  │      本地 uread8 轮询读            │
-  └─ 无法直接调用 fcall               └─ type confusion primitives ✓
-```
-
-### 关键限制
-
-- PE 的 JOP chain fcall (`isNaN(faw)`) 在 MPD 中 crash，无法修复
-- sbx1 可通过 `mpd_fcall(addr, x0...x7)` 在 MPD 上下文调任意函数
-- sbx1 调一次 mpd_fcall 约 2 秒，可接受
-- PE 可通过 IOSurface 读写与 sbx1 通信
+> 更新：2026-05-11
+> 状态：**Phase 1 改进版已实现** — xpac_full 内核地址恢复 + noPAC KC地址交叉验证
 
 ---
 
-## M5 详细计划：内核读写 (ICMPv6 socket)
+## Phase 1 改进 (2026-05-11)
 
-### 背景
+### 已修复的问题
 
-`dist/bundle.js` 已包含 `header.js` 的 ICMPv6 socket 内核读写原语：
-- `mpd_kread64 = early_kread64` (bundle.js:1319)
-- `mpd_kwrite64 = early_kwrite64`
-- `mpd_kread_length = kread_length`
-- `mpd_kwrite_length = kwrite_length`
+1. **`xpac` 函数**: 原版清除 bits 48-55 后丢失内核 VA 前缀 (0xFFFFFFF...)，导致所有地址比较失败。新增 `xpac_full()` 正确恢复内核 VA。
+2. **PAC 指针扫描**: 原版 `(v >> 60n) === 0xFn` 过滤太严格，改为 `>= 0x8n` 涵盖所有内核 PAC 指针。
+3. **Method 1 (gpuDlsym)**: 改用 `noPAC()` (已验证可用) 获取 KC 地址，通过一致性约束计算 KC slide。
+4. **Method 2 (data page PAC)**: 使用 `xpac_full()` 获取完整内核 VA，通过多指针一致性约束计算 kernel slide。
+5. **交叉验证**: KC slide 和 kernel slide 应为同一 KASLR 值，取交集或最接近值。
+6. **移除 Method 4**: 原版尝试 GPU 读 0xFFFFFFF... 地址（已知不可能）。
 
-**但 ICMPv6 socket 创建依赖 `fcall()`（JOP chain），在 MPD 中崩了。**
+### 待验证
 
-### 方案：sbx1 侧创建 ICMPv6 socket
-
-sbx1 已经能调 `mpd_fcall(dlsym, ...)` 和 `mpd_fcall(getpid, ...)`。同样可以调 `socket()` 在 MPD 中创建 socket。
-
-**步骤**：
-
-1. **gpuDlsym 解析所需函数**：
-   - `socket` — 创建 ICMPv6 socket
-   - `setsockopt` — 配置 socket filter
-   - `getsockopt` — 内核读取
-   - `fcntl` — 如果 F_DUPFD 需要的话
-
-2. **mpd_fcall 调用 socket**：
-   ```js
-   let sock = mpd_fcall(socket_raw, AF_INET6, SOCK_DGRAM, IPPROTO_ICMPV6);
-   ```
-
-3. **找到 socket 的 pcb 地址**：
-   - 需要先在 sbx1 侧用已有的内核读写获取 `pcb_zone` 信息
-   - SBX1 的 GPU 内核读写访问 WebContent 内存
-   - MPD 的 socket pcb 在 MPD 进程内，需要从 sbx1 侧查找
-
-4. **或直接用 header.js 的已有方法**：
-   - `header.js` 有 `stage2_init()` / `stage2_prim()` 函数
-   - 其中 `krw_sockets_leak_forever()` 用 `setsockopt`+`getsockopt` 实现内核读写
-   - 如果 sbx1 创建了 socket fd，PE 可以用 header.js 的 `early_kread64`/`early_kwrite64`
-
-5. **将 socket fd 传给 PE**：
-   - sbx1 创建 socket → 得到 fd → 写入 IOSurface
-   - PE 读取 fd → 用 `getsockopt(ICMP6_FILTER)` 做内核读写
-
-### 备选方案
-
-如果 ICMPv6 socket 在 MPD 中因 sandbox 被拒：
-- **备选A**: 使用 `pipe()` 创建一对 fd，通过 pipe buffer 做任意读写（需要知道 pipe 的 kernel object 地址）
-- **备选B**: SBX1 已经有内核读写，直接通过 IOSurface RPC 让 sbx1 做内核读，PE 读结果
-- **备选C**: 用 `mach_vm_read_overwrite` 从 MPD 进程读写内核（需要 task_for_pid 或其他方式获取 kernel task port）
+- 新算法在实际设备上能否正确计算 slide
+- 需要观察 `[M5]` 日志输出确认每一步的结果
 
 ---
 
-## M6 计划：注入 SpringBoard
+## 当前能力总结
 
-M5 完成后有 `kread64`/`kwrite64`，按现有 `sbx1_main.js:7222-7274` 的 kernel proc walk 逻辑：
-1. `kread64(kernel_task_ptr)` → kernel_task
-2. 遍历 proc_list → 找到 PID=34 的 proc
-3. 读 `proc + OFF_TASK` → SpringBoard task_t
-4. 用 `RemoteCall` / `mach_vm_write` 注入 shellcode
+| 能力 | 状态 | 说明 |
+|------|------|------|
+| GPU 内核读 (`uread64`) | ✅ 稳定 | 可读 KC 数据页 (0x1_XXXX_XXXX)，不可读 KC 代码页（hang） |
+| GPU 内核写 (`uwrite64`) | ✅ 已验证 | 对 KC 数据页可写（bit flip 验证通过） |
+| GPU 内核读 (0xFFFFFFF...) | ❌ 不可用 | GPU IOMMU 无法映射高半内核 VA |
+| mpd_fcall | ✅ 稳定 | ~2s/次，可在 MPD 上下文调任意函数 |
+| ICMPv6 socket 创建 | ✅ 成功 | MPD 可创建 SOCK_DGRAM ICMPv6 socket |
+| setsockopt/getsockopt | ✅ 成功 | ICMP6_FILTER roundtrip 正常 |
+| PCB disconnect | ❌ 全失败 | connect(AF_UNSPEC)/shutdown/disconnectx 均返回 -1 |
+| mach_make_memory_entry_64 | ❌ handle=0 | 返回 16 但 handle 为空，无物理内存映射权 |
+| task_for_pid | ❌ 返回 0x0 | MPD 没有 entitlement，host port 也不行 |
+| SpringBoard PID | ✅ 已知 | PID=34，proc_name 确认 |
+
+## 核心瓶颈
+
+**GPU uread64/uwrite64 可以读写 KC 数据页（低半 0x1_XXXX_XXXX），但不能读高半内核 VA (0xFFFFFFF...)。**
+**ICMPv6 PCB disconnect 全部失败，socket-based kernel r/w 无法建立。**
+
+这意味着：我们有内核读写能力，但只能访问 KC 映射的数据页。需要利用 KC 数据页上的信息来找到并 patch 关键内核结构。
 
 ---
 
-## M7 计划：file_downloader
+## 开发路线（优先级排序）
 
-PE 有内核读写后：
-1. 在 SpringBoard 进程分配内存
-2. 写入 shellcode / dylib 加载代码
-3. 创建远程线程执行
-4. 通过 `file_downloader.js` 外传数据
+### Phase 1：利用 GPU krw 获取真实内核基址和 allproc
+
+**目标**：从 KC 数据页找到 kernel slide，计算出真实内核 VA，找到 allproc
+
+**策略 A — 利用 gpuDlsym 返回的函数指针推算 slide（推荐）**
+
+gpuDlsym 返回 PAC 签名的函数指针（如 `task_for_pid = 0x8A21BD01D7CF9CC4`）。
+- xpac 去掉 PAC → 得到函数在 KC 中的 VA
+- 已知 `task_for_pid` 在未 slide KC 中的偏移 → 算出 slide
+- slide 同样适用于数据段 → 可算出 `allproc`、`kernel_task` 等的真实 VA
+
+这是最直接的方法，因为 gpuDlsym 已经成功解析了多个函数。
+
+**策略 B — 利用 KC 数据页上的 PAC 指针推算 slide**
+
+数据页 `page+0xcf8/e38/e88` 有 `0xFFFFFFFE0XXXXXXXX` 形式的指针（PAC 签名的 KC 代码地址）：
+- 去掉 PAC 后得到 KC 代码段地址
+- 与未 slide 的 KC 基址比较 → 得出 slide
+
+**策略 C — 扫描 KC 数据页附近的页找 allproc**
+
+allproc 是 LIST_HEAD，包含指向第一个 proc 的指针。
+- 从已知 data_page 向前后扫描 ±32 页
+- 寻找 allproc 特征（lh_first 指向有效 proc）
+- 风险：大范围扫描容易 hang
+
+### Phase 2：内核数据结构遍历
+
+**目标**：找到 SpringBoard 的 task/proc 结构
+
+1. 从 allproc 遍历 proc 链表（用 uread64 读低半映射）
+2. 对每个 proc 读 `p_pid` 找 PID=34
+3. 读取 SpringBoard 的 `proc → task` 指针
+4. 读取 task 的 IPC space 等关键结构
+5. 准备注入所需的所有内核地址
+
+**注意**：uread64 只能读 KC 映射页（0x1_XXX），而 proc 结构是动态分配的内核堆内存，**不一定**在 KC 映射范围内。可能需要：
+- 先确认 proc 结构是否在 KC 可读范围内
+- 或通过 mpd_fcall + mach_vm_read 读取高半 VA
+
+### Phase 3：AMFI / 代码签名绕过
+
+**目标**：patch 内核使 task_for_pid 或代码签名检查失效
+
+**方案 3A — Patch cs_enforcement_disable（推荐）**
+- 找到 `cs_enforcement_disable` 的内核地址（在 KC 数据段）
+- 用 uwrite64 写入非零值 → 禁用代码签名检查
+- 之后 task_for_pid 应该能成功
+
+**方案 3B — 直接 proc patch**
+- 找到 SpringBoard 的 proc 结构
+- 修改 `p_csflags` 清除 CS_HARD/CS_KILL 标志
+- 不需要 task_for_pid，直接用内核读写操作
+
+**方案 3C — 修改 kernel_task 的 IPC table**
+- 找到 kernel_task 的 itk_space
+- 伪造一个发送 SpringBoard task port 的 IPC entry
+- 用 mpd_fcall 通过伪造的 port 调 mach_vm_*
+
+### Phase 4：SpringBoard 注入
+
+**目标**：在 SpringBoard 进程中执行任意代码
+
+**方案 4A — 通过 task port 注入（需 Phase 3）**
+1. Phase 3 成功后获得 SB task port
+2. mpd_fcall(mach_vm_allocate) 分配内存
+3. mpd_fcall(mach_vm_write) 写入 shellcode
+4. mpd_fcall(thread_create_running) 创建远程线程
+
+**方案 4B — 内核级直接注入（不依赖 task port）**
+1. 从 proc 找到 SB task 指针
+2. 通过内核读写操作 task 的 vm_map
+3. 修改 SB 进程的代码页或写入新页
+4. 劫持已有线程或通过内核 API 创建线程
+
+**方案 4C — dylib 注入**
+1. 在 SB 进程分配内存
+2. 写入 dylib 加载器 shellcode
+3. shellcode 调用 dlopen 加载目标 dylib
+4. dylib 可在用户态做任何事（文件访问、网络等）
+
+### Phase 5：数据提取 (mpd_exfiltrate)
+
+**目标**：从设备提取 keychain/wifi密码等数据
+
+已有代码框架（`mpd_exfiltrate` 函数），需要：
+1. Phase 3/4 完成后，mpd_fcall 有足够权限
+2. 或直接在 sbx1 侧通过内核读读取文件系统缓存
+3. 通过 HTTP 发送到开发机 (192.168.10.188:8001)
 
 ---
 
-## 下一步（无人值守）
+## 即时下一步（Phase 1 实现）
 
-### M5 Step 1：诊断 socket 可用性
+### Step 1：用 gpuDlsym 函数指针推算 kernel slide
 
-在 sbx1 侧加代码：
 ```js
-// 1. gpuDlsym socket
-let socket_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "socket");
-// 2. mpd_fcall 调 socket(AF_INET6=30, SOCK_DGRAM=2, IPPROTO_ICMPV6=58)
-let sock_fd = mpd_fcall(socket_raw.noPAC(), 30n, 2n, 58n, 0n, 0n, 0n, 0n, 0n);
-LOG(`[MPD] socket() = ${sock_fd}`);
+// gpuDlsym 返回的函数指针是 PAC 签名的
+// 例如: task_for_pid = 0x8A21BD01D7CF9CC4
+// xpac 去签名后得到裸函数地址
+
+// 方法1: 利用已解析的多个函数交叉验证
+// task_for_pid, mach_host_self, socket, connect 等
+// 它们之间的相对偏移在 KC 中是固定的
+// 与未 slide 的偏移比较 → 得出 slide
+
+// 方法2: 利用 data_page 上的 0xFFFFFFFE0XXX 指针
+// 这些是 PAC 签名的 KC 代码地址
+// xpac 后得到 KC VA → 与未 slide 基址比较 → slide
 ```
 
-如果 `sock_fd >= 0`，socket 创建成功 → 继续配置 ICMP6_FILTER。
+### Step 2：验证 kernel_base
 
-如果 `sock_fd < 0`（sandbox 拒绝），则走备选方案。
+```js
+// 读 kernel_base 处验证
+let magic = uread64(kernel_base);
+LOG(`kernel_base probe: ${magic.hex()}`);
+```
 
-### M5 Step 2：建立内核读写通道
+### Step 3：找 allproc 并遍历 proc list
 
-**已实现** (sbx1_main.js:7125-7259):
+```js
+let allproc_addr = kernel_base + ALLPROC_OFFSET;
+let first_proc = uread64(allproc_addr);
+// 遍历 proc list 找 PID=34
+```
 
-1. **Socket 诊断**: mpd_fcall(socket, AF_INET6=30, SOCK_DGRAM=2, IPPROTO_ICMPV6=58)
-   - 创建 2 个 ICMPv6 socket (control + rw)
-   - 测试 setsockopt/getsockopt 往返
+---
 
-2. **全局 kread64/kwrite64 包装器**: `globalThis.mpd_kread64` / `mpd_kwrite64`
-   - 通过 mpd_fcall 调用 MPD 中的 getsockopt/setsockopt
-   - `mpd_kread_length` / `mpd_kernel_base` 也注册了
+## 已知风险
 
-3. **GPU 回退**: 如果 socket 失败，pe_main_minimal.js 会尝试通过 read64/write64 进行 GPU 内核 r/w 测试
+1. **GPU uread64 在某些地址 hang** — 代码页必 hang，某些数据地址也可能 hang。需 try/catch + 超时保护
+2. **PAC 去签名** — 需正确使用 xpac_gadget，否则指针错误
+3. **kernel slide 每次启动不同** — 但运行期间稳定
+4. **offset 依赖 iOS 版本** — 需确认目标设备 iOS 版本对应的 XNU offset
+5. **proc 结构可能在堆上不在 KC 映射范围** — uread64 可能读不到动态分配的内核结构
+6. **mpd_fcall ~2s/次** — 大量内核读操作会慢，需批量优化
 
-**待设备测试**:
-- socket() 在 MPD sandbox 下是否允许
-- setsockopt(ICMP6_FILTER)/getsockopt(ICMP6_FILTER) 是否工作
-- PCB 损坏步骤（需要物理内存扫描找到 pcb 地址）
+---
 
-### M6 实现 (sbx1_main.js:7433-7501)
+## 里程碑
 
-- SpringBoard 任务端口获取 (task_for_pid via mpd_fcall)
-- 远程内存分配 (mach_vm_allocate via mpd_fcall)
-- Shellcode 写入 (mach_vm_write via mpd_fcall)
-- 内存保护设置 (mach_vm_protect via mpd_fcall)
-
-### M7 实现 (sbx1_main.js:7470-7495)
-
-- 远程线程创建 (thread_create_running via mpd_fcall)
-- IOSurface 状态寄存器 (+0xF878..+0xF888)
-
-### IOSurface RPC 状态寄存器
-
-| Offset | 字段 | 由谁设置 | 描述 |
-|--------|------|----------|------|
-| +0xF850 | control_sock | sbx1 (M5) | ICMPv6 control socket fd |
-| +0xF858 | rw_sock | sbx1 (M5) | ICMPv6 rw socket fd |
-| +0xF860 | setsockopt ptr | sbx1 (M5) | setsockopt 函数指针 |
-| +0xF868 | getsockopt ptr | sbx1 (M5) | getsockopt 函数指针 |
-| +0xF870 | kernel_base | sbx1 (M5) | 内核基址候选 |
-| +0xF878 | sb_remote_addr | sbx1 (M6) | SpringBoard 远程分配地址 |
-| +0xF880 | sb_task_port | sbx1 (M6) | SpringBoard 任务端口 |
-| +0xF888 | sb_thread_port | sbx1 (M7) | SpringBoard 远程线程端口 |
-
-### 关键限制
-
-**PCB 损坏问题**: ICMPv6 socket 内核读写需要在 MPD 进程中找到 socket 的 pcb 地址并损坏。这需要物理内存访问（gpuRead64/gpuWrite64），或通过 mpd_fcall 在 MPD 中设置 pipe+race condition（可能太慢，~2s/fcall）。
-
-**备选方案**: 如果 socket corruption 不可行，sbx1 可通过 gpuRead64/gpuWrite64 直接做内核读写（如 GPU IOMMU 可访问物理内存），通过 IOSurface 代理 PE 的内核读请求。
+| 阶段 | 目标 | 预计复杂度 | 依赖 |
+|------|------|-----------|------|
+| Phase 1 | kernel slide + allproc | 中 | GPU krw + xpac |
+| Phase 2 | SB proc/task 定位 | 中 | Phase 1（可能需 mpd_fcall 补充读高半 VA） |
+| Phase 3 | AMFI bypass | 中 | Phase 1+2 |
+| Phase 4 | SB 注入 | 高 | Phase 2+3 |
+| Phase 5 | 数据提取 | 低 | Phase 4 |

