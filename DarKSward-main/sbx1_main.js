@@ -7774,9 +7774,7 @@
             LOG(`[M5-DIAG] mach_vm_read(host, kernel_addr) = ${vmr_c}`);
         }
 
-        mpd_free(vmr_data);
-        mpd_free(vmr_count);
-        mpd_free(test_buf);
+        // NOTE: mpd_free not defined, memory reclaimed on process exit
     }
 
     // ===== M5: Kernel Read/Write via ICMPv6 socket (mpd_fcall) =====
