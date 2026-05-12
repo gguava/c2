@@ -99,7 +99,12 @@ const httpServer = http.createServer((req, res) => {
 
     try {
       const content = fs.readFileSync(fullPath);
-      res.writeHead(200, { "Content-Type": mimeType });
+      res.writeHead(200, {
+        "Content-Type": mimeType,
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+      });
       res.end(content);
       return;
     } catch {

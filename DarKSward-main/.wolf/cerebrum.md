@@ -2,7 +2,7 @@
 
 > OpenWolf's learning memory. Updated automatically as the AI learns from interactions.
 > Do not edit manually unless correcting an error.
-> Last updated: 2026-05-09
+> Last updated: 2026-05-12
 
 ## User Preferences
 
@@ -41,6 +41,11 @@
 [2026-05-11] Do NOT use `xpac()` (clears bits 48-55) for kernel VA pointers — it strips the 0xFFFFFFF prefix. Use `xpac_full()` instead which restores kernel prefix via `0xFFFFFFF000000000n | (raw & 0xFFFFFFFFFn)`. For KC user-space addresses (gpuDlsym results), use `noPAC()` (ptr & 0x7FFFFFFFFFn) which correctly preserves bits 38:0.
 [2026-05-11] Do NOT try to GPU-read 0xFFFFFFF... addresses via uread64 — GPU IOMMU cannot map high-half kernel VAs. Only KC-mapped pages (0x1_XXX range) are readable via GPU.
 [2026-05-11] gpuDlsym returns PAC-signed KC user-space addresses (0x1_XXX), NOT kernel VAs. The KC slide and kernel slide are the same KASLR value, but the address spaces are different.
+[2026-05-12] **cs_enforcement_disable is NOT near proc_name** — The brute-force scan around proc_name's data page is wrong. `proc_name` (kernel proc management) and `cs_enforcement_disable` (AMFI module) are in different kernel subsystems, likely far apart in kernel cache. The ±1MB scan found 100 false positives (all zero-initialized int32s), patch them didn't disable AMFI. task_for_pid still fails with KERN_INVALID_ARGUMENT (53) after "patching 100/100 candidates".
+[2026-05-12] **GPU uwrite64 may trigger COW** — KC pages are shared across processes. GPU write to a KC page may only affect WebContent's copy (COW), NOT the live kernel. This explains why patching 100 candidates had zero effect. Need empirical test: write via GPU, read via mpd_fcall (different process) to confirm.
+[2026-05-12] **PCB disconnect fails in MPD** — `connect(AF_UNSPEC)` = -1, `shutdown()` = -1, `disconnectx()` = -1. SOCK_DGRAM ICMPv6 sockets don't support disconnect in MPD sandbox. Fix: try SOCK_RAW, try close()+spray, or try PCB corruption via socket buffer exhaustion.
+[2026-05-12] **Variable scope: socket_sym/getsockopt_raw are block-scoped** — Declared inside `if (m5_socket_ok)` IIFE, not accessible in A2. Always re-resolve via gpuDlsym in A2 scope, or read socket fds from IOSurface.
+[2026-05-12] **Mach-O segname comparison value** — `"__DATA\0"` as u64 LE = `0x0000415441445F5Fn`, NOT `0x415441445F5F0000n`. Use `uread64(kc_base + lc_offset + 0x8n)` and compare to `0x0000415441445F5Fn`.
 
 ## Decision Log
 
@@ -54,10 +59,17 @@
 
 **Our limitation:** sbx1 (WebContent) doesn't have direct access to these primitives. Must go through MPD via `mpd_fcall`.
 
-### Backup options (not yet explored):
+### 2026-05-12: AMFI bypass — A2 implementation
 
-1. **Brute-force scan kernel cache for allproc** — scan pages adjacent to the known data page (from proc_name ADRP) for linked-list patterns. The allproc head might be on nearby pages in the kernel cache.
+**Root cause of failure**: GPU uwrite64 likely triggers COW (copy-on-write) on KC pages. GPU writes only affect WebContent process copy, NOT the live kernel. This explains why patching 100 candidates had zero effect.
 
-2. **Find real kernel functions (not Mach trap stubs) via gpuDlsym** — many resolved symbols are Mach trap stubs (MOV X16 + SVC). Try alternative symbol names like `_proc_find_internal`, `kernproc`, or XNU internal functions that directly reference allproc.
+**PCB disconnect failure**: `connect(AF_UNSPEC)`, `shutdown()`, `disconnectx()` all return -1 in MPD sandbox. SOCK_DGRAM ICMPv6 doesn't support disconnect. Fix attempts: SOCK_RAW, close()+spray.
 
-3. **GPU-based pcb corruption** — since GPU can read KC pages, if the ICMPv6 socket's pcb address can be found at a KC address, use `uwrite64` directly to corrupt it instead of physical OOB.
+**A2 strategy**:
+1. COW verification test: GPU write + mpd_fcall readback
+2. If COW confirmed: try socket spray race for PCB corruption
+3. If COW confirmed and spray fails: scan __DATA via Mach-O parsing (for identification only)
+4. PCB corruption via M5 is the ONLY viable kernel write path
+
+**PCB corruption is THE bottleneck** — everything depends on fixing it.
+**Fix approach**: SOCK_RAW socket type (full TCP/IP stack), close()+spray method, or buffer exhaustion race.
