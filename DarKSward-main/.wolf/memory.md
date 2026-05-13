@@ -3,6 +3,7 @@
 > Chronological action log. Hooks and AI append to this file automatically.
 > Old sessions are consolidated by the daemon weekly.
 | 22:17 | Created pe_main_minimal.js | — | ~466 |
+| 21:52 | Fixed mpd_read64/mpd_read8 hang after nowait PE dispatch — added timeout versions + checks | sbx1_main.js | bug-003 logged | ~80 |
 
 ## Session: 2026-05-12 战略路线审视
 
@@ -12,6 +13,14 @@
 | 12:35 | 创建战略审视文档 | .wolf/strategic_review.md | 记录原版 vs 当前差异、可行路线、优先级建议 | ~1500 |
 
 ## Session: 2026-05-12 继续 A2 AMFI bypass
+
+## Session: 2026-05-13 Fix Phase 0B-alt fcall timeout hang
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|---------|
+| 21:45 | Worker log analysis: CFRelease fix verified working, new 0B-alt hang found | /tmp/worker_log.txt | Bug found: 0B-alt uses bare mpd_fcall after MPD degraded | ~300 |
+| 21:46 | Replaced all 4 mpd_fcall in 0B-alt with mpd_fcall_timeout + checks | sbx1_main.js:7751-7797 | node --check passes | ~600 |
+| 21:47 | Updated buglog.json, memory.md | .wolf/buglog.json, .wolf/memory.md | | ~100 |
 
 | Time | Action | File(s) | Outcome | ~Tokens |
 |------|--------|---------|---------|---------|
@@ -833,3 +842,297 @@
 | 21:50 | Edited sbx1_main.js | 2→2 lines | ~22 |
 | 21:51 | Edited sbx1_main.js | added 3 condition(s) | ~601 |
 | 21:52 | Edited sbx1_main.js | added 15 condition(s) | ~1786 |
+| 22:00 | Session end: 7 writes across 3 files (serene-greeting-stearns.md, pe_main_minimal.js, sbx1_main.js) | 13 reads | ~349763 tok |
+| 22:07 | Edited sbx1_main.js | 4→2 lines | ~22 |
+| 22:09 | Session end: 8 writes across 3 files (serene-greeting-stearns.md, pe_main_minimal.js, sbx1_main.js) | 13 reads | ~349785 tok |
+
+## Session: 2026-05-12 22:14
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 22:39 | Created ../../../.claude/plans/serene-greeting-stearns.md | — | ~1435 |
+| 22:41 | Edited sbx1_main.js | added 10 condition(s) | ~1052 |
+| 22:41 | Edited sbx1_main.js | added 1 condition(s) | ~429 |
+| 22:41 | Edited sbx1_main.js | added 1 condition(s) | ~303 |
+| 22:43 | Edited sbx1_main.js | added 6 condition(s) | ~985 |
+| 22:44 | Edited sbx1_main.js | 3→4 lines | ~35 |
+| 22:52 | Edited sbx1_main.js | 3→4 lines | ~25 |
+| 22:52 | Edited sbx1_main.js | modified if() | ~169 |
+| 22:53 | Session end: 8 writes across 2 files (serene-greeting-stearns.md, sbx1_main.js) | 4 reads | ~122229 tok |
+| 22:56 | Session end: 8 writes across 2 files (serene-greeting-stearns.md, sbx1_main.js) | 4 reads | ~122229 tok |
+| 22:59 | Edited sbx1_main.js | modified if() | ~92 |
+| 23:00 | Session end: 9 writes across 2 files (serene-greeting-stearns.md, sbx1_main.js) | 4 reads | ~122326 tok |
+| 23:05 | Session end: 9 writes across 2 files (serene-greeting-stearns.md, sbx1_main.js) | 4 reads | ~122326 tok |
+| 23:06 | Session end: 9 writes across 2 files (serene-greeting-stearns.md, sbx1_main.js) | 4 reads | ~122326 tok |
+
+## Session: 2026-05-12 23:06
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 23:19 | Created ../../../.claude/plans/serene-greeting-stearns.md | — | ~2250 |
+| 23:45 | Edited sbx1_main.js | added 12 condition(s) | ~1638 |
+| 23:45 | Edited ../../../.claude/plans/serene-greeting-stearns.md | modified DONE() | ~248 |
+| 23:45 | Session end: 3 writes across 2 files (serene-greeting-stearns.md, sbx1_main.js) | 4 reads | ~119466 tok |
+| 00:10 | Edited sbx1_main.js | removed 99 lines | ~31 |
+| 00:10 | Session end: 4 writes across 2 files (serene-greeting-stearns.md, sbx1_main.js) | 4 reads | ~120955 tok |
+
+## Session: 2026-05-12 00:13
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 00:17 | Edited ../../../.claude/settings.json | 32→36 lines | ~368 |
+| 00:18 | Session end: 1 writes across 1 files (settings.json) | 3 reads | ~828 tok |
+
+## Session: 2026-05-12 00:20
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-12 00:28
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-12 00:31
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-12 00:38
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 01:30 | Created ../../../.claude/plans/piped-tickling-orbit.md | — | ~773 |
+| 01:30 | Edited ../../../.claude/plans/piped-tickling-orbit.md | 3→5 lines | ~37 |
+| 01:31 | Edited ../../../.claude/plans/piped-tickling-orbit.md | removed 27 lines | ~41 |
+| 01:31 | Edited ../../../.claude/plans/piped-tickling-orbit.md | 3→3 lines | ~39 |
+| 01:34 | Edited sbx1_main.js | 6→6 lines | ~120 |
+| 01:36 | Edited sbx1_main.js | added 2 condition(s) | ~188 |
+| 01:40 | Edited sbx1_main.js | modified while() | ~17 |
+| 01:46 | Session end: 7 writes across 2 files (piped-tickling-orbit.md, sbx1_main.js) | 4 reads | ~116650 tok |
+| 01:58 | Session end: 7 writes across 2 files (piped-tickling-orbit.md, sbx1_main.js) | 4 reads | ~116650 tok |
+| 02:06 | Session end: 7 writes across 2 files (piped-tickling-orbit.md, sbx1_main.js) | 4 reads | ~116650 tok |
+| 02:36 | Session end: 7 writes across 2 files (piped-tickling-orbit.md, sbx1_main.js) | 4 reads | ~116650 tok |
+| 02:39 | Edited sbx1_main.js | added 9 condition(s) | ~2172 |
+| 02:40 | Session end: 8 writes across 2 files (piped-tickling-orbit.md, sbx1_main.js) | 4 reads | ~120806 tok |
+| 02:47 | Session end: 8 writes across 2 files (piped-tickling-orbit.md, sbx1_main.js) | 4 reads | ~120806 tok |
+| 02:51 | Edited sbx1_main.js | added 15 condition(s) | ~2432 |
+| 02:51 | Session end: 9 writes across 2 files (piped-tickling-orbit.md, sbx1_main.js) | 4 reads | ~123238 tok |
+| 02:56 | Session end: 9 writes across 2 files (piped-tickling-orbit.md, sbx1_main.js) | 4 reads | ~123238 tok |
+
+## Session: 2026-05-13 09:46
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 09:48 | Edited ../../../.claude/settings.json | 32→36 lines | ~408 |
+| 09:48 | Session end: 1 writes across 1 files (settings.json) | 3 reads | ~868 tok |
+| 10:05 | Created ../../../.claude/plans/pure-squishing-comet.md | — | ~1738 |
+| 10:10 | Edited sbx1_main.js | added error handling | ~2699 |
+| 10:11 | Edited sbx1_main.js | inline fix | ~34 |
+| 10:11 | Edited sbx1_main.js | "2026-05-11-Phase1-Improve" → "2026-05-13-Phase0-COW-MME" | ~15 |
+
+## Session: 2026-05-13 Phase0 诊断
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|---------|
+| 10:00 | 分析日志+记忆+buglog，确认所有方向均失败 | /tmp/worker_log.txt, .wolf/*, auto-memory | 确认6个方向全部blocked，核心瓶颈是COW未验证+gpuDlsym不解析数据符号 | ~2000 |
+| 10:20 | 设计多方向回退开发计划 | plan file | 3阶段+7方向决策树：0A COW验证→0B MME→A1/A2/C1/C2 | ~1500 |
+| 10:45 | 实现阶段0A（COW验证）+0B（mach_make_memory_entry_64测试）+0B-alt（mach_vm_read重测） | sbx1_main.js:7432-7607 | 3个诊断测试插入GPU写测试后，版本更新至2026-05-13-Phase0-COW-MME-test | ~3000 |
+| 10:15 | Session end: 5 writes across 3 files (settings.json, pure-squishing-comet.md, sbx1_main.js) | 13 reads | ~127873 tok |
+| 10:19 | Session end: 5 writes across 3 files (settings.json, pure-squishing-comet.md, sbx1_main.js) | 13 reads | ~127873 tok |
+
+## Session: 2026-05-13 10:35
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 10:54 | Edited sbx1_main.js | "2026-05-13-Phase0-COW-MME" → "2026-05-13-Phase0-COW-MME" | ~16 |
+| 10:55 | Edited sbx1_main.js | modified catch() | ~777 |
+| 10:56 | Edited sbx1_main.js | modified LOG() | ~1178 |
+| 10:57 | Session end: 3 writes across 1 files (sbx1_main.js) | 2 reads | ~123767 tok |
+| 11:00 | Session end: 3 writes across 1 files (sbx1_main.js) | 3 reads | ~123767 tok |
+| 11:17 | Edited ../../../.claude/plans/pure-squishing-comet.md | expanded (+23 lines) | ~399 |
+| 11:19 | Edited ../../../.claude/plans/pure-squishing-comet.md | reduced (-48 lines) | ~1324 |
+
+## Session: 2026-05-13 11:23
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 11:25 | Edited sbx1_main.js | added 2 condition(s) | ~2304 |
+| 11:30 | 完全重写0B测试，实现原版DarKSward的PurpleGfxMem IOSurface方法 | sbx1_main.js:7484-7634 | 创建CFDict→设置PurpleGfxMem→IOSurfaceCreate→IOSurfaceGetBaseAddress→mach_make_memory_entry_64→mach_vm_map完整流程 | ~3000 |
+| 12:04 | Session end: 1 writes across 1 files (sbx1_main.js) | 3 reads | ~125225 tok |
+| 12:26 | Created ../../../.claude/plans/pure-squishing-comet.md | — | ~942 |
+| 12:35 | 0B success log analysis — PurpleGfxMem WORKS, crash=mpd_read64 hang (no timeout) | /tmp/worker_log.txt | 确认0B成功(phys mem mapped at 0x32d2a4000, entry=0x7107)，hang原因=mpd_fcall无超时 | ~1500 |
+| 12:40 | Plan v4: fix mpd_read64 hang + 0C physical scan via mach_vm_remap | pure-squishing-comet.md | 4-step plan approved | ~800 |
+| 12:45 | Added mpd_read64_timeout() function | sbx1_main.js:6535-6541 | Uses mpd_fcall_timeout to avoid hang | ~150 |
+| 12:46 | Fixed 0B success path: use mpd_read64_timeout, set PHYS_MEM_MAPPED=true before verify | sbx1_main.js:7596-7608 | No longer hangs on physical memory read | ~200 |
+| 12:47 | Wrapped 0B-alt in if(!PHYS_MEM_MAPPED) | sbx1_main.js:7633-7677 | 0B-alt skipped when PurpleGfxMem succeeds | ~100 |
+| 12:48 | Added Phase 0C: mach_vm_remap offset scanning | sbx1_main.js:7679-7730 | Tests remap at different mem object offsets, 64 pages max | ~400 |
+| 12:28 | Edited sbx1_main.js | added 1 condition(s) | ~166 |
+| 12:28 | Edited sbx1_main.js | added 1 condition(s) | ~296 |
+| 12:29 | Edited sbx1_main.js | added 1 condition(s) | ~85 |
+| 12:29 | Edited sbx1_main.js | added 1 condition(s) | ~44 |
+| 12:30 | Edited sbx1_main.js | added error handling | ~791 |
+| 12:32 | Session end: 7 writes across 2 files (sbx1_main.js, pure-squishing-comet.md) | 6 reads | ~176770 tok |
+
+## Session: 2026-05-13 12:46
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 13:26 | Created ../../../.claude/plans/federated-knitting-barto.md | — | ~529 |
+| 13:28 | Edited sbx1_main.js | added 2 condition(s) | ~1025 |
+| 13:28 | Edited sbx1_main.js | added error handling | ~743 |
+| 13:29 | Edited sbx1_main.js | added 2 condition(s) | ~452 |
+| 13:29 | Edited sbx1_main.js | "2026-05-13-Phase0-COW-MME" → "2026-05-13-Phase0-COW-MME" | ~14 |
+| 13:30 | Edited sbx1_main.js | "Build: Phase1 Improved Sl" → "Build: Phase0-COW-MME-v3 " | ~18 |
+| 13:31 | Edited sbx1_main.js | 1→2 lines | ~24 |
+| 13:31 | Edited sbx1_main.js | modified mpd_fcall_timeout() | ~133 |
+| 13:32 | Edited sbx1_main.js | inline fix | ~44 |
+| 13:32 | Edited sbx1_main.js | inline fix | ~11 |
+| 13:32 | Edited sbx1_main.js | mpd_fcall_timeout() → mpd_fcall_quick() | ~109 |
+| 13:33 | Edited sbx1_main.js | mpd_fcall_timeout() → mpd_fcall_quick() | ~103 |
+| 13:33 | Phase 0C quick scan + mpd_phys_read implemented | sbx1_main.js | VERSION updated to Phase0-COW-MME-v3, added mpd_phys_read, quick scan 8 pages, decision point | ~2000 |
+| 13:35 | Session end: 11 writes across 2 files (sbx1_main.js, federated-knitting-barto.md) | 12 reads | ~126000 tok |
+| 13:35 | Session end: 12 writes across 2 files (federated-knitting-barto.md, sbx1_main.js) | 3 reads | ~128528 tok |
+| 16:41 | Created ../../../.claude/plans/federated-knitting-barto.md | — | ~480 |
+
+## Session: 2026-05-13 16:45
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 16:46 | Edited sbx1_main.js | 3→3 lines | ~44 |
+| 16:48 | Edited sbx1_main.js | modified if() | ~1268 |
+| 16:49 | Edited sbx1_main.js | added error handling | ~444 |
+| 16:51 | Edited sbx1_main.js | added 4 condition(s) | ~1305 |
+| 16:53 | Edited sbx1_main.js | added 1 condition(s) | ~677 |
+| 16:54 | Edited sbx1_main.js | "Build: Phase0-COW-MME-v3 " → "Build: Phase0-COW-MME-v4 " | ~22 |
+| 16:55 | Session end: 6 writes across 1 files (sbx1_main.js) | 1 reads | ~130567 tok |
+| 17:20 | Edited sbx1_main.js | modified if() | ~106 |
+| 17:44 | Edited sbx1_main.js | added 1 condition(s) | ~52 |
+| 17:45 | Edited sbx1_main.js | modified if() | ~56 |
+| 17:45 | Edited sbx1_main.js | modified if() | ~76 |
+| 17:46 | Edited sbx1_main.js | modified catch() | ~24 |
+| 17:48 | Session end: 11 writes across 1 files (sbx1_main.js) | 3 reads | ~132526 tok |
+| 17:51 | Session end: 11 writes across 1 files (sbx1_main.js) | 3 reads | ~132526 tok |
+| 17:58 | Edited sbx1_main.js | 2→3 lines | ~64 |
+| 17:58 | Session end: 12 writes across 1 files (sbx1_main.js) | 3 reads | ~132629 tok |
+| 18:05 | Edited sbx1_main.js | mpd_fcall() → mpd_fcall_quick() | ~48 |
+| 18:06 | Session end: 13 writes across 1 files (sbx1_main.js) | 3 reads | ~132677 tok |
+
+## Session: 2026-05-13 18:11
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 18:21 | Edited sbx1_main.js | 3→4 lines | ~73 |
+| 18:21 | Edited sbx1_main.js | added 2 condition(s) | ~229 |
+| 18:22 | Edited sbx1_main.js | modified if() | ~927 |
+| 18:22 | Edited sbx1_main.js | mpd_fcall() → LOG() | ~154 |
+| 18:23 | Edited sbx1_main.js | 10→9 lines | ~96 |
+| 18:23 | Session end: 5 writes across 1 files (sbx1_main.js) | 1 reads | ~128769 tok |
+| 18:37 | Session end: 5 writes across 1 files (sbx1_main.js) | 1 reads | ~128733 tok |
+| 18:49 | Edited sbx1_main.js | expanded (+11 lines) | ~307 |
+| 18:50 | Edited sbx1_main.js | modified if() | ~357 |
+| 18:54 | Edited sbx1_main.js | modified if() | ~912 |
+| 18:56 | Edited sbx1_main.js | modified if() | ~59 |
+| 18:56 | Session end: 9 writes across 1 files (sbx1_main.js) | 1 reads | ~130218 tok |
+| 19:05 | Edited sbx1_main.js | 6→6 lines | ~132 |
+| 19:06 | Edited sbx1_main.js | 6→6 lines | ~118 |
+| 19:06 | Session end: 11 writes across 1 files (sbx1_main.js) | 1 reads | ~130430 tok |
+| 19:12 | Edited sbx1_main.js | 6→9 lines | ~204 |
+| 19:27 | Edited sbx1_main.js | 7→9 lines | ~322 |
+| 19:28 | Session end: 13 writes across 1 files (sbx1_main.js) | 1 reads | ~131125 tok |
+| 19:37 | Session end: 13 writes across 1 files (sbx1_main.js) | 1 reads | ~131125 tok |
+| 19:38 | Edited sbx1_main.js | mpd_fcall_quick() → mpd_fcall_timeout() | ~76 |
+| 19:39 | Edited sbx1_main.js | added 1 condition(s) | ~238 |
+| 19:40 | Edited sbx1_main.js | mpd_fcall_quick() → mpd_fcall_timeout() | ~69 |
+| 19:41 | Session end: 16 writes across 1 files (sbx1_main.js) | 1 reads | ~131579 tok |
+| 19:46 | Session end: 16 writes across 1 files (sbx1_main.js) | 1 reads | ~131579 tok |
+| 19:49 | Session end: 16 writes across 1 files (sbx1_main.js) | 1 reads | ~131579 tok |
+| 19:58 | Edited sbx1_main.js | inline fix | ~9 |
+| 19:59 | Edited sbx1_main.js | added 2 condition(s) | ~215 |
+| 20:00 | Edited sbx1_main.js | removed 17 lines | ~15 |
+| 20:01 | Edited sbx1_main.js | modified cmp8_wait_for_value() | ~47 |
+| 20:01 | Session end: 20 writes across 1 files (sbx1_main.js) | 1 reads | ~131865 tok |
+
+## Session: 2026-05-13 20:12
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-13 20:47
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 20:52 | Created ../../../.claude/plans/transient-marinating-cherny.md | — | ~568 |
+| 20:55 | Edited sbx1_main.js | mpd_fcall() → mpd_fcall_timeout() | ~392 |
+| 20:55 | Edited sbx1_main.js | mpd_fcall() → mpd_fcall_timeout() | ~338 |
+| 20:59 | Edited sbx1_main.js | modified LOG() | ~50 |
+| 21:00 | Session end: 4 writes across 2 files (transient-marinating-cherny.md, sbx1_main.js) | 3 reads | ~130291 tok |
+| 21:01 | Edited sbx1_main.js | added 3 condition(s) | ~890 |
+| 21:03 | Edited sbx1_main.js | modified if() | ~118 |
+| 21:04 | Edited sbx1_main.js | modified if() | ~330 |
+| 21:05 | Edited sbx1_main.js | 5→6 lines | ~68 |
+| 21:10 | Phase 0B hang fix: added mpd_fcall_timeout to all CF/IOSurface/MME calls in PurpleGfxMem chain | sbx1_main.js | ~130 lines modified, node --check passes | ~1200 |
+| 21:11 | Session end: 9 writes across 2 files (transient-marinating-cherny.md, sbx1_main.js) | 3 reads | ~131889 tok |
+| 21:20 | Edited ../../../.claude/plans/transient-marinating-cherny.md | added 4 condition(s) | ~740 |
+| 21:21 | Edited sbx1_main.js | mpd_fcall() → mpd_fcall_quick() | ~50 |
+| 21:17 | CFRelease hang fix: moved inside if(surface != 0n), mpd_fcall→mpd_fcall_quick | sbx1_main.js | node --check passes | ~200 |
+| 21:23 | Session end: 11 writes across 2 files (transient-marinating-cherny.md, sbx1_main.js) | 4 reads | ~132735 tok |
+| 21:25 | Session end: 11 writes across 2 files (transient-marinating-cherny.md, sbx1_main.js) | 4 reads | ~132735 tok |
+| 21:29 | Edited ../../../.claude/plans/transient-marinating-cherny.md | modified 1() | ~340 |
+| 21:29 | Session end: 12 writes across 2 files (transient-marinating-cherny.md, sbx1_main.js) | 4 reads | ~133099 tok |
+
+## Session: 2026-05-13 21:35
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 21:40 | Edited ../../../.claude/plans/transient-marinating-cherny.md | modified 1() | ~517 |
+| 21:40 | Edited sbx1_main.js | mpd_fcall() → mpd_fcall_timeout() | ~105 |
+| 21:40 | Edited sbx1_main.js | mpd_fcall() → mpd_fcall_timeout() | ~104 |
+| 21:41 | Edited sbx1_main.js | mpd_fcall() → mpd_fcall_timeout() | ~224 |
+| 21:41 | Edited sbx1_main.js | mpd_fcall() → mpd_fcall_timeout() | ~262 |
+| 21:46 | Session end: 5 writes across 2 files (transient-marinating-cherny.md, sbx1_main.js) | 3 reads | ~129048 tok |
+
+## Session: 2026-05-13 21:52
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 22:11 | Created ../../../.claude/plans/transient-marinating-cherny.md | — | ~626 |
+| 22:12 | Edited sbx1_main.js | added 1 condition(s) | ~108 |
+| 22:17 | Edited sbx1_main.js | added 2 condition(s) | ~314 |
+| 22:19 | Edited sbx1_main.js | added 2 condition(s) | ~254 |
+| 22:19 | Session end: 4 writes across 2 files (transient-marinating-cherny.md, sbx1_main.js) | 4 reads | ~131427 tok |
+| 22:20 | Session end: 4 writes across 2 files (transient-marinating-cherny.md, sbx1_main.js) | 4 reads | ~131427 tok |
+| 22:29 | Created ../../../.claude/plans/transient-marinating-cherny.md | — | ~751 |
+| 22:33 | Edited sbx1_main.js | modified mpd_read8_timeout() | ~209 |
+| 22:33 | Edited sbx1_main.js | modified mpd_malloc() | ~45 |
+| 22:36 | Edited sbx1_main.js | mpd_fcall() → mpd_fcall_timeout() | ~238 |
+| 22:36 | Edited sbx1_main.js | mpd_fcall() → mpd_fcall_timeout() | ~22 |
+| 22:36 | Edited sbx1_main.js | added 1 condition(s) | ~85 |
+
+## Session: 2026-05-13 22:38
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 22:43 | Edited sbx1_main.js | mpd_fcall() → mpd_fcall_timeout() | ~137 |
+| 22:44 | Edited sbx1_main.js | modified mpd_fcall() | ~65 |
+| 22:49 | Edited sbx1_main.js | modified if() | ~30 |
+| 22:49 | Session end: 3 writes across 1 files (sbx1_main.js) | 1 reads | ~128723 tok |
+| 22:55 | Session end: 3 writes across 1 files (sbx1_main.js) | 1 reads | ~128723 tok |
+| 22:57 | Created ../../../.claude/plans/transient-marinating-cherny.md | — | ~553 |
+| 22:57 | Session end: 4 writes across 2 files (sbx1_main.js, transient-marinating-cherny.md) | 2 reads | ~129316 tok |
+| 23:27 | Created ../../../.claude/plans/transient-marinating-cherny.md | — | ~548 |
+| 23:29 | Edited sbx1_main.js | modified mpd_fcall() | ~54 |
+| 23:39 | Edited sbx1_main.js | mpd_fcall_timeout() → mpd_fcall() | ~115 |
+| 23:40 | Edited sbx1_main.js | mpd_fcall_timeout() → mpd_fcall() | ~114 |
+| 23:40 | Edited sbx1_main.js | mpd_fcall_timeout() → mpd_fcall() | ~20 |
+| 23:43 | Edited sbx1_main.js | added 1 condition(s) | ~28 |
+| 23:43 | Edited sbx1_main.js | added 1 condition(s) | ~31 |
+| 23:43 | Edited sbx1_main.js | modified if() | ~49 |
+| 23:44 | Edited sbx1_main.js | modified if() | ~44 |
+| 23:44 | Edited sbx1_main.js | modified if() | ~30 |
+| 23:45 | Edited sbx1_main.js | modified catch() | ~31 |
+| 23:45 | Edited sbx1_main.js | modified catch() | ~24 |
+| 23:46 | Edited sbx1_main.js | inline fix | ~28 |
+| 23:46 | Edited sbx1_main.js | mpd_fcall_timeout() → mpd_fcall() | ~96 |
+| 23:47 | Session end: 18 writes across 2 files (sbx1_main.js, transient-marinating-cherny.md) | 3 reads | ~130250 tok |
+| 23:55 | Session end: 18 writes across 2 files (sbx1_main.js, transient-marinating-cherny.md) | 3 reads | ~130250 tok |
