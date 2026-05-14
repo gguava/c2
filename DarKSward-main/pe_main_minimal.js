@@ -8,16 +8,17 @@ globalThis._log_offset_ptr = 0n;
 try {
   // Read surface_address_remote from func_offsets[19]
   // func_offsets_array is a global defined by pe_stage_1
-  let _fob_addr = addrof(func_offsets_array) + 0x10n;
-  let _surf = uread64(_fob_addr + 19n * 8n);
+  // Read buffer pointer first (two-step like pe_stage_1 fcall_init)
+  let _fob_buf = uread64(addrof(func_offsets_array) + 0x10n);
+  let _surf = uread64(_fob_buf + 19n * 0x8n);
   if (_surf && _surf != 0n) {
     globalThis._surf = _surf;
     globalThis._log_offset_ptr = _surf + 0xFE00n;
   }
-} catch(e) {
-  // If we can't read func_offsets_array, IOSurface logging won't work
-  // but at least we caught it before fcall_init
-}
+	} catch(e) {
+	  // If we can't read func_offsets_array, IOSurface logging won't work
+	  // but at least we caught it before fcall_init
+	}
 
 function iosurf_log(msg) {
   if (!globalThis._surf || globalThis._surf == 0n) return;
@@ -42,6 +43,36 @@ function iosurf_log(msg) {
 globalThis.pw = function(s) {
   iosurf_log("[PE] " + (s || ""));
 };
+
+// Fallback: if IOSurface logging failed, use pe_log_buf directly
+if (!globalThis._surf || globalThis._surf == 0n) {
+  try {
+    let _fob_buf2 = uread64(addrof(func_offsets_array) + 0x10n);
+    let _js_inputs = uread64(_fob_buf2 + 2n * 0x8n);
+    let _lb = uread64(_js_inputs + 0x10n);
+    let _lb_off_ptr = uread64(_js_inputs + 0x18n);
+    if (_lb != 0n && _lb_off_ptr != 0n) {
+      globalThis._surf = _lb;
+      globalThis._log_offset_ptr = _lb_off_ptr;
+      // Re-define iosurf_log and pw to write to pe_log_buf (MPD heap) instead of IOSurface
+      iosurf_log = function(msg) {
+        try {
+          let off = uread64(globalThis._log_offset_ptr);
+          if (off + 256n < 0x4000n) {
+            for (let i = 0n; i < BigInt(msg.length); i++) {
+              uwrite8(globalThis._surf + off + i, BigInt(msg.charCodeAt(Number(i))));
+            }
+            uwrite8(globalThis._surf + off + BigInt(msg.length), 0x0an);
+            uwrite64(globalThis._log_offset_ptr, off + BigInt(msg.length) + 1n);
+          }
+        } catch(e2) {}
+      };
+      globalThis.pw = function(s) {
+        iosurf_log("[PE] " + (s || ""));
+      };
+    }
+  } catch(e3) {}
+}
 
 pw("START: pe_main_minimal.js executing");
 
