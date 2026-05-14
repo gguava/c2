@@ -1,12 +1,20 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-12T13:52:34.448Z
-> Files: 76 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-14T19:18:08.151Z
+> Files: 82 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ../../../.claude/plans/
 
-- `joyful-doodling-sundae.md` — Plan: Fix M6 Bracket SyntaxError + Restructure M6 Flow (~745 tok)
-- `serene-greeting-stearns.md` — Fix PE Empty Output + Implement A2 AMFI Bypass (~1448 tok)
+- `md-validated-flamingo.md` — Plan: v10 — mpd_fcall 支持 x8/x9 参数（修复 mach_vm_map 页面保护） (~804 tok)
+- `transient-marinating-cherny.md` — Plan: Fix PE IOSurface Logging — Root Cause & Fix (~1489 tok)
+- `wobbly-munching-kitten.md` — Plan: Robust Modifications — Fix PE Logging + Re-enable Physical Memory Path (~1366 tok)
+
+## ../../../.claude/projects/-home-guava-Projects-c3/memory/
+
+- `chinese_output.md` (~70 tok)
+- `decision_log.md` (~404 tok)
+- `MEMORY.md` (~232 tok)
+- `v10_physical_memory_read.md` — v10 核心修复 (2026-05-14) (~421 tok)
 
 ## ./
 
@@ -23,7 +31,7 @@
 - `MigFilterBypassThread_comp.js` — ***/ (() => { // webpackBootstrap (~29096 tok)
 - `package-lock.json` — npm lock file (~39269 tok)
 - `package.json` — Node.js package manifest (~77 tok)
-- `pe_main_minimal.js` — PE main - minimal: just test fcall_init (~616 tok)
+- `pe_main_minimal.js` — PE main - minimal: just test fcall_init (~971 tok)
 - `pe_main.js` — SOCK: assert, ERROR, new_uint64_t + 48 more (~226502 tok)
 - `pe_stage_1.js` — Declares ab (~2522 tok)
 - `phase1_comparison.md` — Phase 1 对比：`5e4ecc5` vs `a05078e` (~555 tok)
@@ -37,16 +45,17 @@
 - `README.md` — Project documentation (~12886 tok)
 - `run.md` — 服务器启动方式 (~81 tok)
 - `sbx0_main_18.4.js` — Declares libsystem_kernel (~121448 tok)
-- `sbx1_main.js` — VERSION: LOG, gpu_new_uint64_t, adjust_pivot_stack + 8 more (~112582 tok)
+- `sbx1_main.js` — VERSION: LOG, gpu_new_uint64_t, adjust_pivot_stack + 8 more (~129092 tok)
 - `server_log.ts` — PORT: logPrint (~1203 tok)
 - `server_stats.ts` — PORT: logPrint (~670 tok)
+- `stage_comparison.md` — DarKSward 阶段对比表 — 原版 vs 当前版本 (~1013 tok)
 - `test_popus.md` (~128 tok)
 - `webpack.config.js` — Webpack configuration (~1163 tok)
 
 ## .claude/
 
 - `settings.json` (~460 tok)
-- `settings.local.json` — Declares spawn_pe (~1758 tok)
+- `settings.local.json` — Declares spawn_pe (~1849 tok)
 
 ## .claude/rules/
 

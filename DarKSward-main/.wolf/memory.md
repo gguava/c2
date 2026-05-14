@@ -1136,3 +1136,203 @@
 | 23:46 | Edited sbx1_main.js | mpd_fcall_timeout() → mpd_fcall() | ~96 |
 | 23:47 | Session end: 18 writes across 2 files (sbx1_main.js, transient-marinating-cherny.md) | 3 reads | ~130250 tok |
 | 23:55 | Session end: 18 writes across 2 files (sbx1_main.js, transient-marinating-cherny.md) | 3 reads | ~130250 tok |
+| 23:57 | Session end: 18 writes across 2 files (sbx1_main.js, transient-marinating-cherny.md) | 3 reads | ~130250 tok |
+| 23:59 | Created ../../../.claude/plans/transient-marinating-cherny.md | — | ~689 |
+| 00:02 | Edited sbx1_main.js | added 1 condition(s) | ~132 |
+| 00:02 | Edited sbx1_main.js | added 1 condition(s) | ~104 |
+| 00:03 | Edited sbx1_main.js | added 1 condition(s) | ~196 |
+| 00:03 | Edited sbx1_main.js | added 1 condition(s) | ~106 |
+| 00:05 | Session end: 23 writes across 2 files (sbx1_main.js, transient-marinating-cherny.md) | 3 reads | ~131749 tok |
+| 00:08 | Session end: 23 writes across 2 files (sbx1_main.js, transient-marinating-cherny.md) | 3 reads | ~131749 tok |
+
+## Session: 2026-05-13 00:11
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 00:55 | Created ../../../.claude/plans/transient-marinating-cherny.md | — | ~1588 |
+| 09:52 | Edited pe_main_minimal.js | 2→3 lines | ~51 |
+| 09:52 | Edited pe_main_minimal.js | added 3 condition(s) | ~377 |
+| 09:55 | Edited pe_main_minimal.js | modified iosurf_log() | ~592 |
+| 09:55 | Edited sbx1_main.js | added 4 condition(s) | ~307 |
+| 09:57 | Session end: 5 writes across 3 files (transient-marinating-cherny.md, pe_main_minimal.js, sbx1_main.js) | 6 reads | ~134914 tok |
+| 10:26 | Edited sbx1_main.js | modified if() | ~453 |
+| 10:27 | Edited sbx1_main.js | modified if() | ~246 |
+| 10:27 | Session end: 7 writes across 3 files (transient-marinating-cherny.md, pe_main_minimal.js, sbx1_main.js) | 6 reads | ~135778 tok |
+| 10:32 | Edited sbx1_main.js | modified if() | ~514 |
+
+## Session: 2026-05-14 10:35
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-14 10:51
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-14 10:56
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-14 11:08
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 11:15 | Created ../../../.claude/plans/wobbly-munching-kitten.md | — | ~1458 |
+| 11:15 | Edited sbx1_main.js | mpd_fcall_internal() → mpd_fcall_timeout() | ~51 |
+| 11:15 | Edited sbx1_main.js | modified if() | ~54 |
+| 11:15 | Edited sbx1_main.js | modified if() | ~36 |
+| 11:15 | Edited sbx1_main.js | modified if() | ~43 |
+| 11:16 | Edited sbx1_main.js | added 6 condition(s) | ~591 |
+| 11:16 | Edited sbx1_main.js | "2026-05-13-Phase0-COW-MME" → "2026-05-14-PE-Log-Fix-v1" | ~13 |
+| 11:16 | Edited sbx1_main.js | "Build: Phase0-COW-MME-v4 " → "Build: v1 - mpd_fcall tim" | ~26 |
+| 11:16 | Session end: 8 writes across 2 files (wobbly-munching-kitten.md, sbx1_main.js) | 21 reads | ~221111 tok |
+| 11:17 | Session end: 8 writes across 2 files (wobbly-munching-kitten.md, sbx1_main.js) | 21 reads | ~221111 tok |
+
+## Session: 2026-05-14 11:22
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 11:25 | Edited sbx1_main.js | inline fix | ~23 |
+| 11:25 | Edited sbx1_main.js | inline fix | ~15 |
+| 11:25 | Edited sbx1_main.js | inline fix | ~10 |
+| 11:25 | Edited sbx1_main.js | inline fix | ~12 |
+| 11:25 | Edited sbx1_main.js | inline fix | ~14 |
+| 11:25 | Edited sbx1_main.js | inline fix | ~17 |
+| 11:25 | Edited sbx1_main.js | inline fix | ~15 |
+| 11:25 | Edited sbx1_main.js | "Build: v1 - mpd_fcall tim" → "Build: v2 - perf fix: mpd" | ~24 |
+| 11:30 | Fix Phase 0A cow_addr→test_addr, revert mpd_fcall to no-timeout for perf | sbx1_main.js, buglog.json | v2 build: phase 0A bug fixed, performance restored | ~500 |
+| 11:27 | Session end: 8 writes across 1 files (sbx1_main.js) | 2 reads | ~128757 tok |
+| 11:29 | Created ../../../.claude/projects/-home-guava-Projects-c3/memory/chinese_output.md | — | ~61 |
+| 11:29 | Edited ../../../.claude/projects/-home-guava-Projects-c3/memory/MEMORY.md | 1→2 lines | ~34 |
+| 11:29 | Session end: 10 writes across 3 files (sbx1_main.js, chinese_output.md, MEMORY.md) | 3 reads | ~128859 tok |
+| 11:29 | Session end: 10 writes across 3 files (sbx1_main.js, chinese_output.md, MEMORY.md) | 3 reads | ~128859 tok |
+
+## Session: 2026-05-14 11:40
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-14 13:16
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 13:51 | Created ../../../.claude/plans/md-validated-flamingo.md | — | ~890 |
+| 14:22 | Edited sbx1_main.js | modified mpd_read32() | ~81 |
+| 14:26 | Edited sbx1_main.js | added 19 condition(s) | ~2078 |
+| 14:27 | Edited sbx1_main.js | inline fix | ~21 |
+| 14:28 | Edited sbx1_main.js | inline fix | ~43 |
+| 14:28 | Edited sbx1_main.js | inline fix | ~42 |
+| 14:29 | Edited sbx1_main.js | removed 90 lines | ~30 |
+
+## Session: 2026-05-14 14:31
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 14:34 | Edited sbx1_main.js | removed 56 lines | ~87 |
+| 14:35 | Edited sbx1_main.js | "Build: v2 - perf fix: mpd" → "Build: v3 - P2 processor_" | ~25 |
+| 14:36 | Edited sbx1_main.js | expanded (+6 lines) | ~255 |
+| 14:36 | Edited sbx1_main.js | added 3 condition(s) | ~376 |
+| 11:00 | 跳过 P3 section（COW 确认无效） | sbx1_main.js:8888-8940 | ✅ P3 替换为 LOG 跳过 | ~50 |
+| 11:01 | 0B IOSurfaceCreate 添加 Width/Height/PixelFormat 键 | sbx1_main.js:~7650 | ✅ 添加 kIOSurfaceWidth=1, kIOSurfaceHeight=1, kIOSurfacePixelFormat='BGRA' | ~80 |
+| 11:02 | 更新 build 版本字符串 | sbx1_main.js | ✅ v2→v3 | ~5 |
+| 11:03 | node --check 语法验证通过 | sbx1_main.js | ✅ 无错误 | ~10 |
+| 14:37 | Session end: 4 writes across 1 files (sbx1_main.js) | 1 reads | ~129398 tok |
+| 14:52 | Edited sbx1_main.js | mpd_fcall() → mpd_fcall_timeout() | ~225 |
+| 15:00 | Edited sbx1_main.js | mpd_fcall_timeout() → mpd_fcall() | ~244 |
+| 15:01 | Session end: 6 writes across 1 files (sbx1_main.js) | 1 reads | ~130210 tok |
+| 15:08 | Session end: 6 writes across 1 files (sbx1_main.js) | 1 reads | ~130210 tok |
+| 15:26 | Session end: 6 writes across 1 files (sbx1_main.js) | 1 reads | ~130210 tok |
+| 18:27 | Created ../../../.claude/plans/md-validated-flamingo.md | — | ~773 |
+| 18:31 | Edited sbx1_main.js | modified if() | ~50 |
+| 18:33 | Edited sbx1_main.js | added 1 condition(s) | ~106 |
+| 18:34 | Edited sbx1_main.js | added 3 condition(s) | ~695 |
+| 18:34 | Edited sbx1_main.js | "Build: v3 - P2 processor_" → "Build: v4 - 0B disabled +" | ~21 |
+| 18:34 | Session end: 11 writes across 2 files (sbx1_main.js, md-validated-flamingo.md) | 4 reads | ~132143 tok |
+| 18:41 | Created ../../../.claude/plans/md-validated-flamingo.md | — | ~934 |
+
+## Session: 2026-05-14 18:52
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 18:53 | Edited sbx1_main.js | "Build: v4 - 0B disabled +" → "Build: v5 - 0B re-enabled" | ~24 |
+| 18:56 | Edited sbx1_main.js | inline fix | ~22 |
+| 18:57 | Edited sbx1_main.js | 14→14 lines | ~436 |
+| 18:57 | Edited sbx1_main.js | "2026-05-14-PE-Log-Fix-v1" → "2026-05-14-v5-0B-fix" | ~12 |
+| 19:03 | Edited sbx1_main.js | inline fix | ~25 |
+| 19:06 | Edited sbx1_main.js | added 1 condition(s) | ~206 |
+| 19:06 | Edited sbx1_main.js | 7→5 lines | ~85 |
+| 19:07 | Edited sbx1_main.js | added 1 condition(s) | ~124 |
+| 19:10 | Edited sbx1_main.js | modified if() | ~60 |
+| 19:14 | Edited sbx1_main.js | added 1 condition(s) | ~43 |
+| 19:15 | Session end: 10 writes across 1 files (sbx1_main.js) | 2 reads | ~131015 tok |
+| 20:09 | Created ../../../.claude/plans/md-validated-flamingo.md | — | ~708 |
+| 20:29 | Edited sbx1_main.js | "2026-05-14-v5-0B-fix" → "2026-05-14-v6-dlopen-CF" | ~13 |
+| 20:29 | Edited sbx1_main.js | "Build: v5 - 0B re-enabled" → "Build: v6 - dlopen CoreFo" | ~26 |
+| 20:34 | Edited sbx1_main.js | modified LOG() | ~3122 |
+| 20:34 | Session end: 14 writes across 2 files (sbx1_main.js, md-validated-flamingo.md) | 5 reads | ~409750 tok |
+| 20:51 | Edited sbx1_main.js | invalid() → corrupted() | ~464 |
+| 20:54 | Edited sbx1_main.js | inline fix | ~26 |
+| 20:54 | Edited sbx1_main.js | 2→2 lines | ~64 |
+| 20:56 | Session end: 17 writes across 2 files (sbx1_main.js, md-validated-flamingo.md) | 5 reads | ~410256 tok |
+| 21:03 | Created ../../../.claude/plans/md-validated-flamingo.md | — | ~794 |
+| 21:34 | Edited sbx1_main.js | inline fix | ~5 |
+| 21:36 | Edited sbx1_main.js | inline fix | ~12 |
+| 21:36 | Edited sbx1_main.js | "Build: v6 - dlopen CoreFo" → "Build: v7 - 0C timeout fi" | ~23 |
+| 21:37 | Edited sbx1_main.js | modified if() | ~223 |
+| 21:38 | Edited sbx1_main.js | modified if() | ~1028 |
+| 21:39 | Edited sbx1_main.js | modified if() | ~107 |
+
+## Session: 2026-05-14 21:44
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 21:58 | Edited sbx1_main.js | modified if() | ~238 |
+| 22:00 | Session end: 1 writes across 1 files (sbx1_main.js) | 1 reads | ~128262 tok |
+| 22:18 | Edited ../../../.claude/plans/md-validated-flamingo.md | added error handling | ~956 |
+| 22:19 | Edited sbx1_main.js | "2026-05-14-v7-0C-fix" → "2026-05-14-v8-mach_vm_pro" | ~14 |
+| 22:19 | Edited sbx1_main.js | "Build: v7 - 0C timeout fi" → "Build: v8 - mach_vm_prote" | ~19 |
+| 22:20 | Edited sbx1_main.js | added 4 condition(s) | ~793 |
+| 22:21 | Edited sbx1_main.js | added 4 condition(s) | ~428 |
+| 22:21 | Edited sbx1_main.js | added 3 condition(s) | ~272 |
+| 22:21 | Session end: 7 writes across 2 files (sbx1_main.js, md-validated-flamingo.md) | 3 reads | ~132656 tok |
+| 22:27 | Edited ../../../.claude/plans/md-validated-flamingo.md | modified mpd_vm_read_overwrite() | ~1034 |
+| 22:28 | Edited sbx1_main.js | "2026-05-14-v8-mach_vm_pro" → "2026-05-14-v9-vm_read_ove" | ~15 |
+| 22:28 | Edited sbx1_main.js | "Build: v8 - mach_vm_prote" → "Build: v9 - mach_vm_read_" | ~20 |
+| 22:28 | Edited sbx1_main.js | added 2 condition(s) | ~326 |
+| 22:30 | Edited sbx1_main.js | added 2 condition(s) | ~929 |
+| 22:32 | Edited sbx1_main.js | modified if() | ~632 |
+| 22:33 | Edited sbx1_main.js | inline fix | ~15 |
+| 22:33 | Edited sbx1_main.js | modified if() | ~50 |
+| 22:33 | Session end: 15 writes across 2 files (sbx1_main.js, md-validated-flamingo.md) | 3 reads | ~136414 tok |
+| 23:06 | Session end: 15 writes across 2 files (sbx1_main.js, md-validated-flamingo.md) | 3 reads | ~136414 tok |
+| 23:17 | Edited ../../../.claude/plans/md-validated-flamingo.md | modified mach_vm_map() | ~857 |
+| 23:25 | Edited sbx1_main.js | "2026-05-14-v9-vm_read_ove" → "2026-05-14-v10-fcall-x89" | ~13 |
+| 23:25 | Edited sbx1_main.js | "Build: v9 - mach_vm_read_" → "Build: v10 - mpd_fcall x8" | ~23 |
+| 23:25 | Edited sbx1_main.js | modified mpd_fcall_internal() | ~322 |
+
+## Session: 2026-05-14 23:27
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 23:28 | Edited sbx1_main.js | modified mpd_fcall() | ~396 |
+| 23:28 | Edited sbx1_main.js | modified if() | ~740 |
+| 23:28 | Edited sbx1_main.js | 11→8 lines | ~125 |
+| 23:29 | Edited sbx1_main.js | modified if() | ~571 |
+| 23:30 | Session end: 4 writes across 1 files (sbx1_main.js) | 1 reads | ~130922 tok |
+| 00:19 | Session end: 4 writes across 1 files (sbx1_main.js) | 1 reads | ~130922 tok |
+| 00:21 | Session end: 4 writes across 1 files (sbx1_main.js) | 2 reads | ~130922 tok |
+| 00:23 | Created ../../../.claude/projects/-home-guava-Projects-c3/memory/v10_physical_memory_read.md | — | ~435 |
+| 00:23 | Created ../../../.claude/projects/-home-guava-Projects-c3/memory/decision_log.md | — | ~417 |
+| 00:23 | Edited ../../../.claude/projects/-home-guava-Projects-c3/memory/MEMORY.md | 2→3 lines | ~56 |
+| 00:23 | Session end: 7 writes across 4 files (sbx1_main.js, v10_physical_memory_read.md, decision_log.md, MEMORY.md) | 6 reads | ~131894 tok |
+
+## Session: 2026-05-14 03:00
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 03:18 | Created stage_comparison.md | — | ~1080 |
+| 03:18 | Session end: 1 writes across 1 files (stage_comparison.md) | 2 reads | ~51573 tok |
+| 03:20 | Session end: 1 writes across 1 files (stage_comparison.md) | 2 reads | ~51573 tok |
+| 03:25 | Session end: 1 writes across 1 files (stage_comparison.md) | 2 reads | ~51573 tok |

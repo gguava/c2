@@ -51,6 +51,9 @@
 [2026-05-13] **mpd_fcall_timeout corrupts fcall state on timeout** — When `mpd_fcall_timeout` times out, it leaves the JOP/fcall mechanism in a degraded state. ANY subsequent bare `mpd_fcall` will hang indefinitely. This is NOT limited to `mpd_evaluateScript_nowait` — even pre-nowait timeouts (like 0B-alt mach_task_self/mach_host_self) cause this. Fix: `mpd_fcall()` now wraps `mpd_fcall_timeout` internally, so all calls are auto-protected.
 [2026-05-13] **Large code block replacements MUST verify brace balance** — When using Edit to replace code blocks that contain if/else/try/catch, always run `node --check` after. Missing closing braces cause the entire sbx1_main.js to fail parsing, which looks like the exploit is "stuck at early steps." Also: never use `await` in non-async IIFE; never use bare `return` in Phase blocks that should continue to subsequent phases.
 
+- **2026-05-14 — Phase 0A cow_addr undefined bug**: When re-enabling dead code inside `if(false)`, ALWAYS verify all variable references are valid. `cow_addr` was never defined because the entire block was dead. Re-enabling caused silent ReferenceError → COW test always skipped with "test_addr value is 0 or FFs" message.
+- **2026-05-14 — mpd_fcall timeout perf regression**: Wrapping ALL fcalls with 3s timeout kills performance (108s vs 5s). The timeout should only be applied to SPECIFIC operations known to hang (PE log reads, Phase 0B IOSurfaceCreate). Normal fcalls (getpid, proc_listpids, socket) return in <1ms. Use `mpd_fcall_timeout`/`mpd_read64_timeout` selectively, not as the default `mpd_fcall`.
+
 ## Decision Log
 
 <!-- Significant technical decisions with rationale. Why X was chosen over Y. -->

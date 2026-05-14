@@ -1,125 +1,32 @@
 {
-  "session_id": "session-2026-05-12-2106",
-  "started": "2026-05-12T13:06:40.671Z",
+  "session_id": "session-2026-05-14-0300",
+  "started": "2026-05-14T19:00:40.236Z",
   "files_read": {
-    "/home/guava/.claude/projects/-home-guava-Projects-c3/memory/project_a2_alternative.md": {
+    "/home/guava/Projects/c3/DarKSward-main/src/main.js": {
       "count": 1,
-      "tokens": 0,
-      "first_read": "2026-05-12T13:07:44.242Z"
+      "tokens": 2102,
+      "first_read": "2026-05-14T19:05:01.464Z"
     },
-    "/home/guava/.claude/projects/-home-guava-Projects-c3/memory/pe_allproc_alternatives.md": {
+    "/home/guava/Projects/c3/DarKSward-main/src/header.js": {
       "count": 1,
-      "tokens": 0,
-      "first_read": "2026-05-12T13:07:44.252Z"
-    },
-    "/home/guava/.claude/projects/-home-guava-Projects-c3/memory/pe_stage_progress.md": {
-      "count": 1,
-      "tokens": 0,
-      "first_read": "2026-05-12T13:07:44.278Z"
-    },
-    "/home/guava/.claude/projects/-home-guava-Projects-c3/memory/decision_log.md": {
-      "count": 1,
-      "tokens": 0,
-      "first_read": "2026-05-12T13:07:44.281Z"
-    },
-    "/home/guava/.claude/projects/-home-guava-Projects-c3/memory/dev_roadmap_v2.md": {
-      "count": 1,
-      "tokens": 0,
-      "first_read": "2026-05-12T13:07:44.387Z"
-    },
-    "/home/guava/Projects/c3/DarKSward-main/pe_main_minimal.js": {
-      "count": 5,
-      "tokens": 116,
-      "first_read": "2026-05-12T13:07:46.406Z"
-    },
-    "/home/guava/Projects/c3/DarKSward-main/server_log.ts": {
-      "count": 1,
-      "tokens": 1203,
-      "first_read": "2026-05-12T13:07:46.408Z"
-    },
-    "/home/guava/Projects/c3/DarKSward-main/sbx1_main.js": {
-      "count": 12,
-      "tokens": 112582,
-      "first_read": "2026-05-12T13:09:40.996Z"
-    },
-    "/home/guava/Projects/c3/DarKSward-main/pe_main.js": {
-      "count": 1,
-      "tokens": 226502,
-      "first_read": "2026-05-12T13:09:41.017Z"
-    },
-    "/home/guava/Projects/c3/DarKSward-main/pe_stage_1.js": {
-      "count": 1,
-      "tokens": 2522,
-      "first_read": "2026-05-12T13:12:33.059Z"
-    },
-    "/home/guava/Projects/c3/DarKSward-main/plan.md": {
-      "count": 1,
-      "tokens": 1292,
-      "first_read": "2026-05-12T13:12:33.061Z"
-    },
-    "/home/guava/Projects/c3/DarKSward-main/CLAUDE.md": {
-      "count": 1,
-      "tokens": 83,
-      "first_read": "2026-05-12T13:12:33.141Z"
-    },
-    "/home/guava/Projects/c3/DarKSward-main/build_pe_main.sh": {
-      "count": 1,
-      "tokens": 663,
-      "first_read": "2026-05-12T13:52:52.029Z"
+      "tokens": 48314,
+      "first_read": "2026-05-14T19:05:01.470Z"
     }
   },
   "files_written": [
     {
-      "file": "/home/guava/.claude/plans/serene-greeting-stearns.md",
+      "file": "/home/guava/Projects/c3/DarKSward-main/stage_comparison.md",
       "action": "create",
-      "tokens": 1654,
-      "at": "2026-05-12T13:32:18.409Z"
-    },
-    {
-      "file": "/home/guava/Projects/c3/DarKSward-main/pe_main_minimal.js",
-      "action": "edit",
-      "tokens": 615,
-      "at": "2026-05-12T13:49:44.456Z"
-    },
-    {
-      "file": "/home/guava/Projects/c3/DarKSward-main/sbx1_main.js",
-      "action": "edit",
-      "tokens": 21,
-      "at": "2026-05-12T13:49:59.402Z"
-    },
-    {
-      "file": "/home/guava/Projects/c3/DarKSward-main/sbx1_main.js",
-      "action": "edit",
-      "tokens": 101,
-      "at": "2026-05-12T13:50:19.540Z"
-    },
-    {
-      "file": "/home/guava/Projects/c3/DarKSward-main/sbx1_main.js",
-      "action": "edit",
-      "tokens": 22,
-      "at": "2026-05-12T13:50:40.462Z"
-    },
-    {
-      "file": "/home/guava/Projects/c3/DarKSward-main/sbx1_main.js",
-      "action": "edit",
-      "tokens": 601,
-      "at": "2026-05-12T13:51:14.376Z"
-    },
-    {
-      "file": "/home/guava/Projects/c3/DarKSward-main/sbx1_main.js",
-      "action": "edit",
-      "tokens": 1786,
-      "at": "2026-05-12T13:52:34.457Z"
+      "tokens": 1157,
+      "at": "2026-05-14T19:18:08.160Z"
     }
   ],
   "edit_counts": {
-    "../../../.claude/plans/serene-greeting-stearns.md": 1,
-    "pe_main_minimal.js": 1,
-    "sbx1_main.js": 5
+    "stage_comparison.md": 1
   },
-  "anatomy_hits": 7,
-  "anatomy_misses": 4,
-  "repeated_reads_warned": 15,
+  "anatomy_hits": 2,
+  "anatomy_misses": 0,
+  "repeated_reads_warned": 0,
   "cerebrum_warnings": 0,
-  "stop_count": 0
+  "stop_count": 5
 }

@@ -148,6 +148,584 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-13T15:46:23.955Z"
+    },
+    {
+      "id": "bug-009",
+      "timestamp": "2026-05-14T01:55:42.041Z",
+      "error_message": "Missing guard clause",
+      "file": "sbx1_main.js",
+      "root_cause": "No early return/throw for edge case: pe_log_offset === 0n || pe_log_offset === MPD_FCALL_TIMED_OU",
+      "fix": "Added guard clause: if (pe_log_offset === 0n || pe_log_offset ==)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T01:55:42.041Z"
+    },
+    {
+      "id": "bug-010",
+      "timestamp": "2026-05-14T02:27:12.200Z",
+      "error_message": "Significant refactor of ",
+      "file": "sbx1_main.js",
+      "root_cause": "19 lines replaced/restructured",
+      "fix": "Rewrote 45→19 lines (19 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T02:27:12.200Z"
+    },
+    {
+      "id": "bug-011",
+      "timestamp": "2026-05-14T03:15:38.492Z",
+      "error_message": "Wrong reference: mpd_fcall_internal should be mpd_fcall_timeout",
+      "file": "sbx1_main.js",
+      "root_cause": "Used \"mpd_fcall_internal\" instead of \"mpd_fcall_timeout\"",
+      "fix": "Changed mpd_fcall_internal → mpd_fcall_timeout",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T03:15:38.492Z"
+    },
+    {
+      "id": "bug-012",
+      "timestamp": "2026-05-14T03:15:44.332Z",
+      "error_message": "Wrong condition in logic",
+      "file": "sbx1_main.js",
+      "root_cause": "Condition was: if (false)",
+      "fix": "Changed to: if (globalThis.GPU_WRITE_SUCCESS)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-14T03:15:47.355Z"
+    },
+    {
+      "id": "bug-013",
+      "timestamp": "2026-05-14T03:16:00.137Z",
+      "error_message": "Significant refactor of ",
+      "file": "sbx1_main.js",
+      "root_cause": "7 lines replaced/restructured",
+      "fix": "Rewrote 21→48 lines (7 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T03:16:00.137Z"
+    },
+    {
+      "id": "bug-014",
+      "timestamp": "2026-05-14T03:16:11.334Z",
+      "error_message": "Incorrect value in code",
+      "file": "sbx1_main.js",
+      "root_cause": "Had \"2026-05-13-Phase0-COW-MME-v3\"",
+      "fix": "Changed to \"2026-05-14-PE-Log-Fix-v1\"",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-14T03:16:11.469Z"
+    },
+    {
+      "id": "bug-015",
+      "timestamp": "2026-05-14T03:25:00.247Z",
+      "error_message": "Wrong reference: mpd_fcall_timeout should be mpd_fcall_internal",
+      "file": "sbx1_main.js",
+      "root_cause": "Used \"mpd_fcall_timeout\" instead of \"mpd_fcall_internal\"",
+      "fix": "Changed mpd_fcall_timeout → mpd_fcall_internal",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 6,
+      "last_seen": "2026-05-14T03:25:23.580Z"
+    },
+    {
+      "id": "bug-016",
+      "timestamp": "2026-05-14T03:25:48.903Z",
+      "error_message": "Incorrect value in code",
+      "file": "sbx1_main.js",
+      "root_cause": "Had `Build: v1 - mpd_fcall timeout fix + PE log GPU fa",
+      "fix": "Changed to `Build: v2 - perf fix: mpd_fcall no-timeout + Phas",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T03:25:48.903Z"
+    },
+    {
+      "id": "bug-017",
+      "timestamp": "2026-05-14T11:30:00.000Z",
+      "error_message": "Phase 0A used undefined variable cow_addr",
+      "file": "sbx1_main.js",
+      "root_cause": "Re-enabled Phase 0A (was if(false)) but cow_addr was never defined — dead code. ReferenceError caught silently, COW test always skipped",
+      "fix": "Changed cow_addr → test_addr, mpd_read64 → mpd_read64_timeout",
+      "tags": [
+        "undefined-variable",
+        "dead-code",
+        "phase-0a"
+      ],
+      "related_bugs": [
+        "bug-012"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T11:30:00.000Z"
+    },
+    {
+      "id": "bug-018",
+      "timestamp": "2026-05-14T06:26:33.662Z",
+      "error_message": "Missing guard clause",
+      "file": "sbx1_main.js",
+      "root_cause": "No early return/throw for edge case: mhs_sym_early.noPAC(",
+      "fix": "Added guard clause: if (mhs_sym_early.noPAC()",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T06:26:33.662Z"
+    },
+    {
+      "id": "bug-019",
+      "timestamp": "2026-05-14T06:27:51.668Z",
+      "error_message": "Wrong reference: 0x203n should be mpd_task_port",
+      "file": "sbx1_main.js",
+      "root_cause": "Used \"0x203n\" instead of \"mpd_task_port\"",
+      "fix": "Changed 0x203n → mpd_task_port",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T06:27:51.668Z"
+    },
+    {
+      "id": "bug-020",
+      "timestamp": "2026-05-14T06:34:27.429Z",
+      "error_message": "Significant refactor of ",
+      "file": "sbx1_main.js",
+      "root_cause": "38 lines replaced/restructured",
+      "fix": "Rewrote 56→7 lines (38 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T06:34:27.429Z"
+    },
+    {
+      "id": "bug-021",
+      "timestamp": "2026-05-14T06:35:13.622Z",
+      "error_message": "Incorrect value in code",
+      "file": "sbx1_main.js",
+      "root_cause": "Had `Build: v2 - perf fix: mpd_fcall no-timeout + Phas",
+      "fix": "Changed to `Build: v3 - P2 processor_set_tasks + dynamic port",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T06:35:13.622Z"
+    },
+    {
+      "id": "bug-022",
+      "timestamp": "2026-05-14T06:52:26.752Z",
+      "error_message": "Significant refactor of ",
+      "file": "sbx1_main.js",
+      "root_cause": "2 lines replaced/restructured",
+      "fix": "Rewrote 12→18 lines (2 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T06:52:26.752Z"
+    },
+    {
+      "id": "bug-023",
+      "timestamp": "2026-05-14T10:31:15.478Z",
+      "error_message": "Wrong condition in logic",
+      "file": "sbx1_main.js",
+      "root_cause": "Condition was: if (globalThis.GPU_WRITE_SUCCESS && !globalThis.PHYS_M)",
+      "fix": "Changed to: if (false)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T10:31:15.478Z"
+    },
+    {
+      "id": "bug-024",
+      "timestamp": "2026-05-14T10:34:21.997Z",
+      "error_message": "Missing guard clause",
+      "file": "sbx1_main.js",
+      "root_cause": "No early return/throw for edge case: psd_ret === MPD_FCALL_TIMED_OUT",
+      "fix": "Added guard clause: if (psd_ret === MPD_FCALL_TIMED_OUT)",
+      "tags": [
+        "auto-detected",
+        "guard-clause",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T10:34:21.997Z"
+    },
+    {
+      "id": "bug-025",
+      "timestamp": "2026-05-14T10:34:44.510Z",
+      "error_message": "Incorrect value in code",
+      "file": "sbx1_main.js",
+      "root_cause": "Had `Build: v3 - P2 processor_set_tasks + dynamic port",
+      "fix": "Changed to `Build: v4 - 0B disabled + P2 timeout-safe (fcall ",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T10:34:44.510Z"
+    },
+    {
+      "id": "bug-026",
+      "timestamp": "2026-05-14T10:53:36.685Z",
+      "error_message": "Incorrect value in code",
+      "file": "sbx1_main.js",
+      "root_cause": "Had `Build: v4 - 0B disabled + P2 timeout-safe (fcall ",
+      "fix": "Changed to `Build: v5 - 0B re-enabled + kCFAllocatorDefault f",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-14T10:57:44.166Z"
+    },
+    {
+      "id": "bug-027",
+      "timestamp": "2026-05-14T10:56:49.741Z",
+      "error_message": "Wrong condition in logic",
+      "file": "sbx1_main.js",
+      "root_cause": "Condition was: if (false)",
+      "fix": "Changed to: if (globalThis.GPU_WRITE_SUCCESS && !globalThis.PHYS_M)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T10:56:49.741Z"
+    },
+    {
+      "id": "bug-028",
+      "timestamp": "2026-05-14T11:07:41.102Z",
+      "error_message": "Significant refactor of ",
+      "file": "sbx1_main.js",
+      "root_cause": "8 lines replaced/restructured",
+      "fix": "Rewrote 10→9 lines (8 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T11:07:41.102Z"
+    },
+    {
+      "id": "bug-029",
+      "timestamp": "2026-05-14T12:29:06.835Z",
+      "error_message": "Incorrect value in code",
+      "file": "sbx1_main.js",
+      "root_cause": "Had \"2026-05-14-v5-0B-fix\"",
+      "fix": "Changed to \"2026-05-14-v6-dlopen-CF\"",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-14T12:29:17.064Z"
+    },
+    {
+      "id": "bug-030",
+      "timestamp": "2026-05-14T12:51:57.911Z",
+      "error_message": "Wrong operator: || should be !=",
+      "file": "sbx1_main.js",
+      "root_cause": "Used \"||\" instead of \"!=\"",
+      "fix": "Changed operator || → !=",
+      "tags": [
+        "auto-detected",
+        "operator-fix",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T12:51:57.911Z"
+    },
+    {
+      "id": "bug-031",
+      "timestamp": "2026-05-14T12:54:15.944Z",
+      "error_message": "Wrong reference: MPD_kCFAllocatorDefault should be alloc",
+      "file": "sbx1_main.js",
+      "root_cause": "Used \"MPD_kCFAllocatorDefault\" instead of \"alloc\"",
+      "fix": "Changed MPD_kCFAllocatorDefault → alloc",
+      "tags": [
+        "auto-detected",
+        "wrong-reference",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T12:54:15.944Z"
+    },
+    {
+      "id": "bug-032",
+      "timestamp": "2026-05-14T13:36:20.794Z",
+      "error_message": "Incorrect value in code",
+      "file": "sbx1_main.js",
+      "root_cause": "Had `Build: v6 - dlopen CoreFoundation + fix KeyCallBa",
+      "fix": "Changed to `Build: v7 - 0C timeout fix + GPU uread64 fallback",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T13:36:20.794Z"
+    },
+    {
+      "id": "bug-033",
+      "timestamp": "2026-05-14T13:38:58.507Z",
+      "error_message": "Wrong operator: >= should be !==",
+      "file": "sbx1_main.js",
+      "root_cause": "Used \">=\" instead of \"!==\"",
+      "fix": "Changed operator >= → !==",
+      "tags": [
+        "auto-detected",
+        "operator-fix",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-14T13:39:37.936Z"
+    },
+    {
+      "id": "bug-034",
+      "timestamp": "2026-05-14T13:58:41.519Z",
+      "error_message": "Significant refactor of ",
+      "file": "sbx1_main.js",
+      "root_cause": "55 lines replaced/restructured",
+      "fix": "Rewrote 85→13 lines (55 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T13:58:41.519Z"
+    },
+    {
+      "id": "bug-035",
+      "timestamp": "2026-05-14T14:18:33.512Z",
+      "error_message": "Missing error handling in unknown",
+      "file": "../../../.claude/plans/md-validated-flamingo.md",
+      "root_cause": "Code path had no error handling — exceptions would propagate uncaught",
+      "fix": "Added try/catch block",
+      "tags": [
+        "auto-detected",
+        "error-handling",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T14:18:33.512Z"
+    },
+    {
+      "id": "bug-036",
+      "timestamp": "2026-05-14T14:19:46.301Z",
+      "error_message": "Incorrect value in code",
+      "file": "sbx1_main.js",
+      "root_cause": "Had \"2026-05-14-v7-0C-fix\"",
+      "fix": "Changed to \"2026-05-14-v8-mach_vm_protect\"",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-14T14:19:52.640Z"
+    },
+    {
+      "id": "bug-037",
+      "timestamp": "2026-05-14T14:20:26.481Z",
+      "error_message": "Significant refactor of ",
+      "file": "sbx1_main.js",
+      "root_cause": "3 lines replaced/restructured",
+      "fix": "Rewrote 11→43 lines (3 removed)",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T14:20:26.481Z"
+    },
+    {
+      "id": "bug-038",
+      "timestamp": "2026-05-14T14:28:05.492Z",
+      "error_message": "Incorrect value in code",
+      "file": "sbx1_main.js",
+      "root_cause": "Had \"2026-05-14-v8-mach_vm_protect\"",
+      "fix": "Changed to \"2026-05-14-v9-vm_read_overwrite\"",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-14T14:28:12.782Z"
+    },
+    {
+      "id": "bug-039",
+      "timestamp": "2026-05-14T14:30:56.854Z",
+      "error_message": "Significant refactor of ",
+      "file": "sbx1_main.js",
+      "root_cause": "21 lines replaced/restructured",
+      "fix": "Rewrote 36→45 lines (21 removed) | Also: LOG(\"[0C] Remap timed out — memory_object_port may; LOG(\"[0C] This is expected: PurpleGfxMem creates a",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-14T14:33:20.087Z"
+    },
+    {
+      "id": "bug-040",
+      "timestamp": "2026-05-14T14:33:00.503Z",
+      "error_message": "Wrong condition in logic",
+      "file": "sbx1_main.js",
+      "root_cause": "Condition was: if (map_ret !== MPD_FCALL_TIMED_OUT && map_ret != 0n)",
+      "fix": "Changed to: if (map_ret !== MPD_FCALL_TIMED_OUT)",
+      "tags": [
+        "auto-detected",
+        "logic-fix",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T14:33:00.503Z"
+    },
+    {
+      "id": "bug-041",
+      "timestamp": "2026-05-14T15:17:53.996Z",
+      "error_message": "Wrong operator: === should be <<",
+      "file": "../../../.claude/plans/md-validated-flamingo.md",
+      "root_cause": "Used \"===\" instead of \"<<\"",
+      "fix": "Changed operator === → <<",
+      "tags": [
+        "auto-detected",
+        "operator-fix",
+        "md"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T15:17:53.996Z"
+    },
+    {
+      "id": "bug-042",
+      "timestamp": "2026-05-14T15:25:02.818Z",
+      "error_message": "Incorrect value in code",
+      "file": "sbx1_main.js",
+      "root_cause": "Had \"2026-05-14-v9-vm_read_overwrite\"",
+      "fix": "Changed to \"2026-05-14-v10-fcall-x89\"",
+      "tags": [
+        "auto-detected",
+        "wrong-value",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-14T15:25:10.055Z"
+    },
+    {
+      "id": "bug-043",
+      "timestamp": "2026-05-14T15:28:21.048Z",
+      "error_message": "Significant refactor of ",
+      "file": "sbx1_main.js",
+      "root_cause": "10 lines replaced/restructured",
+      "fix": "Rewrote 15→18 lines (10 removed) | Also: // WARNING: 0B passes 12 args but mpd_fcall only s; // x0=real_task_port, x1=mvm_addr_buf, x2=mme_size",
+      "tags": [
+        "auto-detected",
+        "refactor",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 2,
+      "last_seen": "2026-05-14T15:28:49.583Z"
+    },
+    {
+      "id": "bug-044",
+      "timestamp": "2026-05-14T15:28:57.150Z",
+      "error_message": "Wrong operator: != should be <<",
+      "file": "sbx1_main.js",
+      "root_cause": "Used \"!=\" instead of \"<<\"",
+      "fix": "Changed operator != → <<",
+      "tags": [
+        "auto-detected",
+        "operator-fix",
+        "js"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-14T15:28:57.150Z"
     }
   ]
 }
